@@ -11,6 +11,7 @@ local player = require('player');
 local model  = require('model');
 local style  = require('style');
 local ah     = require('ahhistory');
+local tray   = require('tray');
 
 local ui = {
     reset   = false,  -- put the window back where it starts next frame
@@ -647,6 +648,30 @@ local function settings_window(s)
     end
 end
 
+-- The crystal on the minimized window's icon: a long diamond, its left facet lit.
+local function crystal(dl, x, y, w, h)
+    local cx, hw, mid = x + w / 2, h * 0.22, y + h * 0.44;
+    local top, bottom = { cx, y + h * 0.14 }, { cx, y + h * 0.86 };
+    dl:AddTriangleFilled(top, { cx - hw, mid }, bottom, style.col('accent'));
+    dl:AddTriangleFilled(top, bottom, { cx + hw, mid }, style.col('accent', 150));
+end
+
+-- Minimized: the icon in the tray at the bottom right (tray.lua). Click it to bring the window
+-- back.
+function ui.draw_icon(s, save)
+    style.set(s.theme);
+    local hit = tray.icon('allrecipes', {
+        tip = 'allrecipes: click to open',
+        panel = style.col('panel', style.panel_alpha()), edge = style.col('edge', 200),
+        hot_panel = style.col('chip', style.panel_alpha()), hot_edge = style.col('accent', 200),
+        glyph = crystal,
+    });
+    if (hit) then
+        s.minimized = false;
+        save();
+    end
+end
+
 function ui.draw(s, you, save)
     style.set(s.theme);
     imgui.SetNextWindowPos({ s.x, s.y }, ui.reset and ImGuiCond_Always or ImGuiCond_FirstUseEver);
@@ -654,11 +679,14 @@ function ui.draw(s, you, save)
     ui.reset = false;
     style.push_window();
     style.push_controls();
-    local open = { true };
     local title = ('allrecipes - %s%s###allrecipes'):fmt(player.CRAFTS[s.craft].name, s.desynth and ' desynthesis' or '');
-    if (imgui.Begin(title, open, bit.bor(ImGuiWindowFlags_NoSavedSettings, ImGuiWindowFlags_NoCollapse))) then
+    -- No close button: a - in its place minimizes it to the icon (/ar hides it).
+    if (imgui.Begin(title, nil, bit.bor(ImGuiWindowFlags_NoSavedSettings, ImGuiWindowFlags_NoCollapse))) then
         local wx, wy = imgui.GetWindowPos();
         local ww, wh = imgui.GetWindowSize();
+        if (tray.title_button('##ar_minimize', wx, wy, ww, { text = style.col('text'), hover = style.col('bar', 250), held = style.col('edge', 230) })) then
+            s.minimized, ui.dirty = true, true;
+        end
         if (model.error ~= nil) then
             imgui.TextColored(style.f('bad'), ('No recipe data (%s). Run tools/gen_recipes.py.'):fmt(model.error));
         else
@@ -699,16 +727,13 @@ function ui.draw(s, you, save)
         end
     end
     imgui.End();
-    if (open[1] and s.cfg) then
+    if (s.cfg) then
         settings_window(s);
     end
     style.pop_controls();
     style.pop_window();
 
-    if (not open[1]) then
-        s.visible = false;
-        save();
-    elseif ((ui.moved and not imgui.IsMouseDown(ImGuiMouseButton_Left)) or ui.dirty) then
+    if ((ui.moved and not imgui.IsMouseDown(ImGuiMouseButton_Left)) or ui.dirty) then
         ui.moved, ui.dirty = false, false;
         save();
     end

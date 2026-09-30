@@ -19,7 +19,7 @@
 
 addon.name    = 'allrecipes';
 addon.author  = 'Relli';
-addon.version = '0.1';
+addon.version = '0.2';
 addon.desc    = 'Every era recipe by craft, with your odds, skill-ups, HQ rates and profit.';
 addon.link    = '';
 
@@ -31,9 +31,11 @@ local player   = require('player');
 local prices   = require('prices');
 local ui       = require('ui');
 local ah       = require('ahhistory');
+local tray     = require('tray');
 
 local defaults = T{
     visible    = false,
+    minimized  = false,   -- shown as an icon at the bottom right instead
     x = 120, y = 120, w = 900, h = 560,
     craft      = 1,       -- the tab: 1 woodworking .. 8 cooking
     desynth    = false,
@@ -73,8 +75,9 @@ local CRAFT_NAMES = {
 };
 
 local function help()
-    msg('/allrecipes (or /ar)   show or hide the window');
+    msg('/allrecipes (or /ar)   show or hide the window, or bring it back from its icon');
     msg('/ar <craft>   open it on a craft: wood, smith, gold, cloth, leather, bone, alchemy, cook');
+    msg('/ar min   minimize it to an icon at the bottom right; click the icon to bring it back');
     msg('/ar prices export [file]   save your prices as JSON (in config/addons/allrecipes)');
     msg('/ar prices import <file>   add prices from JSON: {"4098": 90} or [{"id": 4098, "price": 90}]');
     msg('/ar reset   move the window back to where it starts');
@@ -101,10 +104,12 @@ local function debug()
         priced = priced + 1;
     end
     msg(('%d recipes (%d synthesis, %d desynthesis); %d prices typed in'):fmt(n, synth, n - synth, priced));
+    msg(tray.status());
 end
 
 ashita.events.register('load', 'allrecipes_load', function ()
     ar.settings = settings.load(defaults);
+    tray.init('allrecipes');
     ui.search[1] = ar.settings.search or '';
     if (not model.load()) then
         err(('No recipe data (%s). Run tools/gen_recipes.py.'):fmt(tostring(model.error)));
@@ -129,6 +134,7 @@ settings.register('settings', 'allrecipes_settings_update', function (s)
 end);
 
 ashita.events.register('unload', 'allrecipes_unload', function ()
+    tray.hide('allrecipes');
     settings.save();
     if (prices.dirty) then
         prices.save();
@@ -147,10 +153,17 @@ ashita.events.register('command', 'allrecipes_command', function (e)
     local s = ar.settings;
     local what = (args[2] or ''):lower();
     if (what == '') then
-        s.visible = not s.visible;
+        if (s.visible and s.minimized) then
+            s.minimized = false;
+        else
+            s.visible = not s.visible;
+        end
+        save();
+    elseif (what == 'min' or what == 'minimize') then
+        s.visible, s.minimized = true, true;
         save();
     elseif (CRAFT_NAMES[what] ~= nil) then
-        s.visible, s.craft = true, CRAFT_NAMES[what];
+        s.visible, s.minimized, s.craft = true, false, CRAFT_NAMES[what];
         ui.scroll_top = true;
         save();
     elseif (what == 'prices' and (args[3] or ''):lower() == 'export') then
@@ -226,8 +239,12 @@ ashita.events.register('d3d_present', 'allrecipes_present', function ()
         prices.touch();
     end
     ah.tick(now);
-    if (not s.visible) then
+    if (s.visible and s.minimized) then
+        ui.draw_icon(s, save);
         return;
     end
-    ui.draw(s, player.you(s.gear), save);
+    tray.hide('allrecipes');
+    if (s.visible) then
+        ui.draw(s, player.you(s.gear), save);
+    end
 end);
