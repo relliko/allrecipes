@@ -30,7 +30,7 @@ Nothing is ever sent to the server and nothing is asked of it: allrecipes only r
 
 **In the window** (it looks like scouter's):
 - **Minimize:** the `–` where the close button would be shrinks the window to a small crystal icon at the bottom right of the screen. The icon is as tall as the points addon's compact bar, twice as wide, and scales with your menu resolution the same way. Click it to bring the window back; `/ar` hides the window altogether. It stays minimized when you reload.
-- **The icon row:** scouter's minimized map and compass sit in the same row. The two addons tell each other which icons are showing through Ashita's plugin events, which stay inside your game. When one icon goes, the other slides over.
+- **The icon row:** the minimized windows of deeps, droptables and scouter (its map and compass) sit in the same row. The two addons tell each other which icons are showing through Ashita's plugin events, which stay inside your game. When one icon goes, the other slides over.
 - **Craft chips** show your level in each craft. The one you're on is shown big, with your rank and how far you are toward its cap.
 - **Toolbar:** switch between synthesis and desynthesis, all recipes or skill-ups, and selling on the AH or to an NPC.
 - **Settings chip:** opens a settings window where you can:

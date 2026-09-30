@@ -19,7 +19,7 @@
 
 addon.name    = 'allrecipes';
 addon.author  = 'Relli';
-addon.version = '0.2';
+addon.version = '0.2.1';
 addon.desc    = 'Every era recipe by craft, with your odds, skill-ups, HQ rates and profit.';
 addon.link    = '';
 

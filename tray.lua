@@ -1,17 +1,16 @@
 --[[
 * tray - minimized windows as small icons in one row at the bottom right of the screen, shared by
-* every addon that carries this file (the same file in each: allrecipes, deeps, scouter).
+* every addon that carries this file.
 *
 * An icon is as tall as the points addon's compact bar (16 of the game's menu pixels, scaled to
-* its window the same way, libs/scaling) and twice as wide. The addons keep the row in order by
-* telling each other which icons are showing, with Ashita's plugin events
-* (AshitaCore:GetPluginManager():RaiseEvent). Those only go between the addons in your game;
-* nothing is sent to the server. The row is sorted by name, from the right, and an icon not heard
-* of for a few seconds (its addon unloaded or stopped) leaves it.
+* its window the same way, libs/scaling) and twice as wide.
 *
-* Until an addon has heard any of these events (another addon's, or its own come back), it can't
-* tell whether they get through, so its icons keep fixed places of their own (SLOTS): the row may
-* have a gap, but icons never overlap. tray.status() says which it is (/ar debug).
+* No addon knows about any other. Each says which of its icons are showing, by name, with Ashita's
+* plugin events (AshitaCore:GetPluginManager():RaiseEvent), and lays out the row from the names it
+* hears: sorted, from the right. The events only go between the addons in your game; nothing is
+* sent to the server. An icon not heard of for a few seconds (its addon unloaded or stopped) leaves
+* the row. A new addon only needs this file; the others don't change. tray.status() says what an
+* addon hears (/ar debug).
 *
 * tray.init(addon) at load; tray.icon(id, opts) each frame an icon shows, true when it's clicked;
 * tray.hide(id) each frame it doesn't and at unload (it tells the others once).
@@ -24,7 +23,7 @@ local imgui = require('imgui');
 local tray = {
     mine   = { },    -- [id] = { shown, said } for this addon's icons
     others = { },    -- [id] = when another addon's icon was last heard of (os.clock)
-    live   = false,  -- the events get through: this addon has heard one
+    live   = false,  -- this addon has heard one of the events (for tray.status)
     scale  = nil,    -- the game's window over its menu resolution, read once
 };
 
@@ -32,7 +31,6 @@ local PREFIX = 'tray1|';  -- event names: tray1|here|<id>, tray1|gone|<id>, tray
 local EVERY  = 1;         -- seconds between announcements while an icon shows
 local FORGET = 3.5;       -- seconds unheard before another addon's icon leaves the row
 local H      = 16;        -- menu pixels: the height of the points addon's compact bar
-local SLOTS  = { allrecipes = 0, deeps = 1, scouter_compass = 2, scouter_map = 3 };  -- while the addons can't hear each other
 local FLAGS  = bit.bor(ImGuiWindowFlags_NoDecoration, ImGuiWindowFlags_NoMove, ImGuiWindowFlags_NoSavedSettings,
     ImGuiWindowFlags_NoFocusOnAppearing, ImGuiWindowFlags_NoNav, ImGuiWindowFlags_NoBackground);
 
@@ -103,9 +101,6 @@ end
 
 -- An icon's place in the row, 0 at the right.
 function tray.slot(id, now)
-    if (not tray.live) then
-        return SLOTS[id] or 0;
-    end
     for i, other in ipairs(tray.row(now)) do
         if (other == id) then
             return i - 1;
@@ -117,8 +112,8 @@ end
 -- What the row is, for a debug command.
 function tray.status()
     local row = tray.row(os.clock());
-    return string.format('Icon row (right to left): %s. The addons %s.', #row > 0 and table.concat(row, ', ') or 'empty',
-        tray.live and 'hear each other' or 'have not heard each other yet, so each icon keeps a fixed place');
+    return string.format('Icon row (right to left): %s. %s', #row > 0 and table.concat(row, ', ') or 'empty',
+        tray.live and 'The addons hear each other.' or 'No addon heard yet: if icons overlap, the addons can\'t hear each other.');
 end
 
 --[[
