@@ -101,13 +101,13 @@ The addon can't see crafting rings, foods that raise success, or advanced image 
 ## AH price history
 Look at an item's price history at the auction house and allrecipes keeps it. Any price you haven't typed in then comes from it, shown faintly with a `~`.
 - **What it keeps:** the newest ten sales of each item from the last 180 days, singles and stacks separately.
-- **Singles or stacks:** the history itself doesn't say which it is. The category list you browsed to get there does: it gives how many singles and stacks are on sale. An item that doesn't stack on Phoenix (ores, logs and more) is always singles. A history that can't be told apart is kept, but not used as a price.
+- **Singles or stacks:** the history itself doesn't say which it is. The category list you browsed to get there does: it gives how many singles and stacks are on sale. An item that doesn't stack on Phoenix (ores, logs and more) is always singles. A history that can't be told apart is still used: by which of the item's other histories its prices are nearer, or else by what an NPC pays for it. Its tooltip line says "likely singles (unsure)" or "likely stacks (unsure)".
 - **Price used:** the middle sale. A stack's price is divided by the stack size, and a price from stacks is marked `stk` in the box.
 - **Singles or stacks, when an item has both:** the settings say which to use (singles to start). Right-click a price box to switch that one item; the choice is remembered.
 - **Hover a price box** to see the sales behind it.
 - **Your own price** always wins; empty the box to use the AH's again.
 
-It never asks the server for anything. The history comes from the game's search server over its own connection, where no packet event can see it. So allrecipes reads it from the game's memory after the game has received it for you. When you open the auction house, it looks through memory in the background for the layout of a history or a category list (known from `src/search/packets/`) until it finds where the game keeps them. Browsing any category is usually enough. After that it just watches those spots. All of this is through `ReadProcessMemory`, so memory the game frees can't crash it.
+It never asks the server for anything. The history comes from the game's search server over its own connection, where no packet event can see it. So allrecipes reads it from the game's memory after the game has received it for you. When you open the auction house, it looks through memory in the background for the layout of a history or a category list (known from `src/search/packets/`) until it finds where the game keeps them. Browsing any category is usually enough. After that it watches those spots, and looks again every 10 seconds while you're there, since the game sometimes moves where it keeps the next one. All of this is through `ReadProcessMemory`, so memory the game frees can't crash it.
 
 | Command | |
 |---|---|

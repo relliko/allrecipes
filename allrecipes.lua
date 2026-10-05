@@ -22,7 +22,7 @@
 
 addon.name    = 'allrecipes';
 addon.author  = 'Relli';
-addon.version = '0.3.1';
+addon.version = '0.3.2';
 addon.desc    = 'Every era recipe by craft, with your odds, skill-ups, HQ rates and profit.';
 addon.link    = 'https://github.com/relliko/allrecipes';
 
@@ -148,6 +148,7 @@ ashita.events.register('load', 'allrecipes_load', function ()
     end
     prices.estimate = ah.estimate;
     ah.stacks = model.error == nil and model.stacks or nil;
+    ah.npc = model.error == nil and model.npc or nil;
     ah.load();
     if (ah.error ~= nil) then
         err(('Couldn\'t read the AH history (%s).'):fmt(ah.error));

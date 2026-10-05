@@ -26,6 +26,7 @@ local prices = require('prices');
 local ah = {
     enabled = true,
     stacks  = nil,     -- [item id] = stack size on Phoenix (data/stacks.lua); nil: ask the game
+    npc     = nil,     -- [item id] = what an NPC pays (data/npc.lua), to guess singles from stacks
     prefer  = 'single',-- where an item has both, which its price comes from ('single' or 'stack')
     data    = { },     -- [item id] = { at = when, single = { { price, date }, ... }, stack = { ... },
                        --   unknown = { ... }, use = 'single' or 'stack' when you picked one for it }
@@ -55,6 +56,8 @@ local ARM_FOR     = 600;   -- seconds after the auction house opens
 local POLL_EVERY  = 0.2;
 local SCAN_EVERY  = 5;
 local SCANS       = 30;    -- at most, a visit (looking goes on in the background)
+local RESCAN_EVERY = 10;   -- while watching, look again this often: the game moves where it keeps them
+local MAX_SPOTS   = 48;    -- watched at most; the oldest go first
 local SAVE_EVERY  = 10;
 local KEEP_DAYS   = 180;   -- sales older than this aren't kept
 
@@ -268,7 +271,16 @@ function ah.kind_of(h)
     return nil;
 end
 
--- Keep a history (the newest 10 sales the server sends, less any older than KEEP_DAYS).
+local function newest(sales)
+    local t = 0;
+    for _, s in ipairs(sales or { }) do
+        t = math.max(t, s[2]);
+    end
+    return t;
+end
+
+-- Keep a history (the newest 10 sales the server sends, less any older than KEEP_DAYS). One older
+-- than what's kept (a stale copy left in the game's memory) is passed over.
 function ah.keep(h)
     local kind = ah.kind_of(h) or 'unknown';
     local cutoff = os.time() - KEEP_DAYS * 86400;
@@ -279,6 +291,9 @@ function ah.keep(h)
         end
     end
     local d = ah.data[h.id] or { };
+    if (newest(h.sales) < newest(d[kind])) then
+        return;
+    end
     d[kind], d.at = sales, os.time();
     ah.data[h.id] = d;
     ah.last = { id = h.id, kind = kind, n = #sales };
@@ -291,16 +306,67 @@ local function has(d, kind)
 end
 
 --[[
-* Which history an item's price comes from: the one you picked for it, else where it has both the
-* one preferred in the settings (ah.prefer), else the one it has. nil without either.
+* Whether a history whose kind wasn't known is more likely singles or stacks: by which of the item's
+* kept histories its prices are nearer, else by what an NPC pays (a single rarely sells for more
+* than 9 times that, a stack rarely for less than 9 singles' worth). nil when there's no telling.
 --]]
-function ah.basis(id)
+function ah.guess(id, sales)
+    local size = stack_size(id);
+    if (size <= 1) then
+        return 'single';
+    end
+    local m = median(sales);
+    if (m == nil or m <= 0) then
+        return nil;
+    end
+    local d = ah.data[id];
+    local s = has(d, 'single') and median(d.single) or nil;
+    local t = has(d, 'stack') and median(d.stack) or nil;
+    if (s ~= nil and t ~= nil) then
+        return math.abs(math.log(m / s)) <= math.abs(math.log(m / t)) and 'single' or 'stack';
+    elseif (s ~= nil) then
+        return m >= s * size / 2 and 'stack' or 'single';
+    elseif (t ~= nil) then
+        return m <= t / size * 2 and 'single' or 'stack';
+    end
+    local npc = ah.npc ~= nil and tonumber(ah.npc[id]) or nil;
+    if (npc ~= nil and npc > 0) then
+        return m >= npc * size * 0.75 and 'stack' or 'single';
+    end
+    return nil;
+end
+
+--[[
+* An item's histories as they're used: { single = sales, stack = sales, guessed = kind }. A history
+* of unknown kind stands in, as its guessed kind, for one the item doesn't have.
+--]]
+local function used(id)
     local d = ah.data[id];
     if (d == nil) then
         return nil;
     end
-    if (d.use ~= nil and has(d, d.use)) then
-        return d.use;
+    local u = { single = has(d, 'single') and d.single or nil, stack = has(d, 'stack') and d.stack or nil };
+    if (has(d, 'unknown')) then
+        local g = ah.guess(id, d.unknown);
+        if (g ~= nil and u[g] == nil) then
+            u[g], u.guessed = d.unknown, g;
+        end
+    end
+    return u;
+end
+
+--[[
+* Which history an item's price comes from: the one you picked for it, else where it has both the
+* one preferred in the settings (ah.prefer), else the one it has. nil without either.
+--]]
+function ah.basis(id)
+    local d = used(id);
+    if (d == nil) then
+        return nil;
+    end
+    local picked = ah.data[id].use;
+    if (picked ~= nil and has(d, picked)) then
+        return picked;
     end
     if (has(d, 'single') and has(d, 'stack')) then
         return ah.prefer == 'stack' and 'stack' or 'single';
@@ -310,7 +376,7 @@ end
 
 -- Whether an item has both a singles and a stacks history to choose between.
 function ah.both(id)
-    local d = ah.data[id];
+    local d = used(id);
     return has(d, 'single') and has(d, 'stack');
 end
 
@@ -335,7 +401,7 @@ function ah.estimate(id)
     if (basis == nil) then
         return nil;
     end
-    local m = median(ah.data[id][basis]);
+    local m = median(used(id)[basis]);
     if (basis == 'stack') then
         m = m / stack_size(id);
     end
@@ -349,7 +415,7 @@ function ah.describe(id, gil)
         return nil;
     end
     local lines, now, size = { }, os.time(), stack_size(id);
-    local basis = ah.basis(id);
+    local basis, u = ah.basis(id), used(id);
     local function line(label, sales, per, kind)
         if (sales == nil or #sales == 0) then
             return;
@@ -369,7 +435,11 @@ function ah.describe(id, gil)
     end
     line('AH singles', d.single, false, 'single');
     line(('AH stacks of %d'):fmt(size), d.stack, true, 'stack');
-    line('AH, singles or stacks unknown', d.unknown, false, nil);
+    if (u.guessed ~= nil) then
+        line(('AH, likely %s (unsure)'):fmt(u.guessed == 'stack' and ('stacks of %d'):fmt(size) or 'singles'), d.unknown, u.guessed == 'stack', u.guessed);
+    else
+        line('AH, singles or stacks unknown', d.unknown, false, nil);
+    end
     if (ah.both(id)) then
         lines[#lines + 1] = ('Right-click: use the %s price instead'):fmt(basis == 'stack' and 'singles' or 'stack');
     end
@@ -423,8 +493,8 @@ end
 local function job_step(job, budget)
     while (budget > 0) do
         local r = job.regions[job.ri];
-        if (r == nil or (not r.image and #job.found > 0) or #job.found >= 16) then
-            return true;  -- done; or found in the game's own data, so no need for the rest
+        if (r == nil or #job.found >= 32) then
+            return true;
         end
         local n = math.min(CHUNK, r[2] - job.off);
         local chunk = n > 0 and ah.read(r[1] + job.off, n) or nil;
@@ -457,9 +527,24 @@ local function job_step(job, budget)
     return false;
 end
 
+-- Watch what a look found as well as what's watched already (the newest first, MAX_SPOTS at most).
 local function job_finish(job)
     if (#job.found > 0) then
-        ah.spots, ah.seen = job.found, { };
+        local spots, known = { }, { };
+        for _, list in ipairs({ job.found, ah.spots }) do
+            for _, m in ipairs(list) do
+                if (not known[m] and #spots < MAX_SPOTS) then
+                    known[m] = true;
+                    spots[#spots + 1] = m;
+                end
+            end
+        end
+        for m in pairs(ah.seen) do
+            if (not known[m]) then
+                ah.seen[m] = nil;
+            end
+        end
+        ah.spots = spots;
         ah.poll();
     end
     return #job.found;
@@ -492,16 +577,18 @@ function ah.tick(now)
     if (not ah.enabled or now > ah.armed) then
         return;
     end
-    if (#ah.spots == 0) then
-        if (ah.job == nil and ah.scans < SCANS and now >= ah.next_scan) then
-            ah.job = job_start();
-        end
-        if (ah.job ~= nil and job_step(ah.job, STEP)) then
-            local job = ah.job;
-            ah.job, ah.next_scan = nil, now + SCAN_EVERY;
-            job_finish(job);
-        end
-    elseif (now >= (ah.next_poll or 0)) then
+    -- Look through memory until something's found, then again every so often while watching it,
+    -- as the game may keep the next history somewhere else (a look goes on over many frames).
+    if (ah.job == nil and now >= ah.next_scan and (#ah.spots > 0 or ah.scans < SCANS)) then
+        ah.job = job_start();
+    end
+    if (ah.job ~= nil and job_step(ah.job, STEP)) then
+        local job = ah.job;
+        ah.job = nil;
+        job_finish(job);
+        ah.next_scan = now + (#ah.spots > 0 and RESCAN_EVERY or SCAN_EVERY);
+    end
+    if (#ah.spots > 0 and now >= (ah.next_poll or 0)) then
         ah.next_poll = now + POLL_EVERY;
         ah.poll();
     end
