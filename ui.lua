@@ -646,6 +646,17 @@ local function detail(s, you, r)
     end
 
     -- Materials.
+    -- The old crafting myth: face the crystal's direction, on its day. The server uses neither.
+    for _, e in ipairs(player.CRYSTALS) do
+        if (e.id == r[5]) then
+            dim(('Crafting myth: face %s (%s) on %s.'):fmt(e.face, e.element, e.day));
+            if (imgui.IsItemHovered()) then
+                imgui.SetTooltip('The old myth: each way on the compass has an element (N dark, NE light, E ice,\nSE wind, S earth, SW lightning, W water, NW fire), and facing your crystal\'s way\non its day helps. Square Enix said direction and day don\'t matter, and Phoenix\'s\nsynthesis code (synthutils.cpp) doesn\'t look at either. It\'s here for luck.');
+            end
+            break;
+        end
+    end
+
     imgui.SeparatorText(desynth and 'Item to break up' or 'Materials');
     imgui.SameLine(box_x);
     dim('AH each');

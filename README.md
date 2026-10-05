@@ -98,6 +98,8 @@ HQ is capped at 80%.
 
 **Profit a try** is what the results sell for, weighted by their chances, less what you use up on average: the crystal, and the materials in full on a success or at their loss rate on a break.
 
+**Crafting myth:** each recipe also shows the old advice of which way to face and which day to synth on, from its crystal (N dark, NE light, E ice, SE wind, S earth, SW lightning, W water, NW fire, on the crystal's own day). Square Enix said neither matters, and Phoenix's synthesis code doesn't look at them; it's there for luck.
+
 The addon can't see crafting rings, foods that raise success, or advanced image support's lower break rate, so those aren't counted.
 
 ## AH price history

@@ -90,15 +90,17 @@ end
 
 -- The eight crystals, in the game's order; each element's cluster is 8 on, its HQ crystal
 -- (Inferno ..., used the same in a synth, synthutils.cpp) 142 on. rgb stands in for the icon.
+-- face and day are the old crafting myth's, which the server ignores: the compass has an element
+-- each way (N dark, NE light, E ice, SE wind, S earth, SW lightning, W water, NW fire).
 player.CRYSTALS = {
-    { id = 4096, element = 'Fire',      rgb = { 232, 86, 64 } },
-    { id = 4097, element = 'Ice',       rgb = { 120, 196, 240 } },
-    { id = 4098, element = 'Wind',      rgb = { 104, 208, 120 } },
-    { id = 4099, element = 'Earth',     rgb = { 214, 172, 82 } },
-    { id = 4100, element = 'Lightning', rgb = { 176, 118, 232 } },
-    { id = 4101, element = 'Water',     rgb = { 76, 132, 236 } },
-    { id = 4102, element = 'Light',     rgb = { 244, 244, 236 } },
-    { id = 4103, element = 'Dark',      rgb = { 128, 108, 152 } },
+    { id = 4096, element = 'Fire',      face = 'NW', day = 'Firesday',     rgb = { 232, 86, 64 } },
+    { id = 4097, element = 'Ice',       face = 'E',  day = 'Iceday',       rgb = { 120, 196, 240 } },
+    { id = 4098, element = 'Wind',      face = 'SE', day = 'Windsday',     rgb = { 104, 208, 120 } },
+    { id = 4099, element = 'Earth',     face = 'S',  day = 'Earthsday',    rgb = { 214, 172, 82 } },
+    { id = 4100, element = 'Lightning', face = 'SW', day = 'Lightningday', rgb = { 176, 118, 232 } },
+    { id = 4101, element = 'Water',     face = 'W',  day = 'Watersday',    rgb = { 76, 132, 236 } },
+    { id = 4102, element = 'Light',     face = 'NE', day = 'Lightsday',    rgb = { 244, 244, 236 } },
+    { id = 4103, element = 'Dark',      face = 'N',  day = 'Darksday',     rgb = { 128, 108, 152 } },
 };
 player.CLUSTER, player.HQ = 8, 142;
 
