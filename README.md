@@ -45,7 +45,7 @@ Nothing is ever sent to the server and nothing is asked of it: allrecipes only r
 - **Sorting:** click a column head to sort by it; click again to reverse.
 - **Tooltips:** hover over a profit in the list to see how it adds up.
 
-Image support counts toward your odds. It starts at +1. If it's still up after 2 minutes it must be advanced support or a guild belt, so it turns +3 by itself. Click the image support button to change it by hand.
+Image support counts toward your odds. Under your level there's a **support** selector for the craft you're on: **auto** counts what's on you (it starts at +1, and if it's still up after 2 minutes it must be advanced support or a guild belt, so it turns +3 by itself; click auto again to switch), or pick **none**, **+1** or **+3** to see the odds as if you had it. The choice is kept for each craft. Advanced support's lower break loss isn't counted.
 
 ## Your skill to the tenth
 The server keeps craft skill in tenths but only tells your client whole levels. Every skill-up does come with a message, though: "skill rises 0.3 points", and "reaches level 23" when that crosses a level. allrecipes reads those (only reads; they're the packets the game receives anyway) and keeps your skill as a range that each skill-up narrows:

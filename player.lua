@@ -70,14 +70,24 @@ function player.set_imagery(c, power)
     end
 end
 
+-- The image support counted for a craft: what you picked (support[c] 0, 1 or 3), or with auto
+-- (-1) what's up on you now.
+function player.support(c, support)
+    local pick = support ~= nil and support[c] or -1;
+    if (pick == 0 or pick == 1 or pick == 3) then
+        return pick;
+    end
+    local im = player.imagery[c];
+    return im ~= nil and im.power or 0;
+end
+
 -- What odds.lua works with: { level, bonus, rank, capped }, bonus being image support plus the
 -- gear bonus you set for each craft.
-function player.you(gear)
+function player.you(gear, support)
     local you = { level = { }, bonus = { }, rank = { }, capped = { } };
     for c = 1, #player.CRAFTS do
         you.level[c], you.rank[c], you.capped[c] = craft_skill(c);
-        local im = player.imagery[c];
-        you.bonus[c] = (im ~= nil and im.power or 0) + (gear and gear[c] or 0);
+        you.bonus[c] = player.support(c, support) + (gear and gear[c] or 0);
     end
     return you;
 end

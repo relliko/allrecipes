@@ -322,16 +322,30 @@ local function header(s, you)
     dim(('%s, cap %d'):fmt(player.RANKS[rank] or '?', cap));
     local capped = you.capped[c] or level >= cap;
     style.bar(160, capped and 1 or (lo / 10 - rank * 10) / 10, capped and 'hq' or 'accent');
+    -- Image support: auto (what's up on you), or picked by hand to see the odds with it.
     local im = player.imagery[c];
-    if (im ~= nil) then
-        if (style.chip('##ar_img', ('image support +%d'):fmt(im.power), true, 'hq')) then
+    local pick = s.support[c] or -1;
+    dim('support');
+    local auto = im ~= nil and ('auto +%d'):fmt(im.power) or 'auto: none';
+    if (chip('##ar_sup_auto', auto, pick == -1, im ~= nil and 'hq' or nil, 6)) then
+        if (pick == -1 and im ~= nil) then
             player.set_imagery(c, im.power == 1 and 3 or 1);
         end
-        if (imgui.IsItemHovered()) then
-            imgui.SetTooltip('Free image support is +1, advanced support and guild belts +3.\nIt turns +3 by itself when it lasts over 2 minutes; click to change it.');
+        s.support[c], ui.dirty = -1, true;
+    end
+    if (imgui.IsItemHovered()) then
+        imgui.SetTooltip(im ~= nil
+            and 'Counts the image support that\'s on you. Free support is +1, advanced support and\nguild belts +3; it turns +3 by itself when it lasts over 2 minutes. Click again to switch.'
+            or 'Counts image support when it\'s on you: +1 free, +3 advanced or a guild belt.');
+    end
+    for _, v in ipairs({ 0, 1, 3 }) do
+        if (chip('##ar_sup_' .. v, v == 0 and 'none' or ('+%d'):fmt(v), pick == v, v > 0 and 'hq' or nil)) then
+            s.support[c], ui.dirty = v, true;
         end
-    else
-        dim('no image support');
+        if (imgui.IsItemHovered()) then
+            imgui.SetTooltip(({ [0] = 'Count no image support, whatever\'s on you.', [1] = 'Count free image support (+1), whether or not it\'s on you.',
+                [3] = 'Count advanced image support or a guild belt (+3), whether or not it\'s on you.\nAdvanced support\'s lower break loss isn\'t counted.' })[v]);
+        end
     end
     if ((s.gear[c] or 0) > 0) then
         imgui.SameLine(0, 6);

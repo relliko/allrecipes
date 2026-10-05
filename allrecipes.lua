@@ -22,7 +22,7 @@
 
 addon.name    = 'allrecipes';
 addon.author  = 'Relli';
-addon.version = '0.4.2';
+addon.version = '0.4.3';
 addon.desc    = 'Every era recipe by craft, with your odds, skill-ups, HQ rates and profit.';
 addon.link    = 'https://github.com/relliko/allrecipes';
 
@@ -50,6 +50,7 @@ local defaults = T{
     keyitems   = true,    -- list recipes that need a key item
     makeable   = false,   -- list only recipes you can make now (every craft high enough, key item had)
     gear       = T{ 0, 0, 0, 0, 0, 0, 0, 0 },  -- skill added by gear or moghancements, by craft
+    support    = T{ -1, -1, -1, -1, -1, -1, -1, -1 },  -- image support counted, by craft: -1 what's up, or 0, 1, 3
     sort       = 'lv',
     dir        = 1,
     search     = '',
@@ -78,6 +79,15 @@ end
 
 -- Settings from an older version, or edited by hand: the skill ranges as skill.lua needs them.
 local function fix(s)
+    if (type(s.support) ~= 'table') then
+        s.support = T{ };
+    end
+    for c = 1, 8 do
+        local v = s.support[c];
+        if (v ~= -1 and v ~= 0 and v ~= 1 and v ~= 3) then
+            s.support[c] = -1;
+        end
+    end
     if (type(s.skill) ~= 'table') then
         s.skill = T{ };
     end
@@ -112,7 +122,7 @@ local function help()
 end
 
 local function debug()
-    local you = player.you(ar.settings.gear);
+    local you = player.you(ar.settings.gear, ar.settings.support);
     for c, craft in ipairs(player.CRAFTS) do
         local im = player.imagery[c];
         local lo, hi = skill.range(ar.settings.skill, c, you);
@@ -259,7 +269,7 @@ ashita.events.register('packet_in', 'allrecipes_packet_in', function (e)
     if (e.id == 0x04C) then
         ah.arm(os.clock());
     elseif (e.id == 0x029 and ar.settings ~= nil) then
-        skill.packet(ar.settings.skill, e.data, player.id(), player.you(ar.settings.gear), os.clock());
+        skill.packet(ar.settings.skill, e.data, player.id(), player.you(ar.settings.gear, ar.settings.support), os.clock());
     end
 end);
 
@@ -277,7 +287,7 @@ ashita.events.register('d3d_present', 'allrecipes_present', function ()
         prices.touch();
     end
     ah.tick(now);
-    local you = player.you(s.gear);
+    local you = player.you(s.gear, s.support);
     skill.sync(s.skill, you, now);
     if (skill.dirty) then
         skill.dirty = false;
