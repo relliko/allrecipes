@@ -165,6 +165,65 @@ function odds.skillup(r, craft, you)
     return p * k + (1 - p) * on_break;
 end
 
+-- How much a skill-up gives, in tenths, by how many levels the recipe is over you (0-14+):
+-- chances of 0.1 to 0.5 (skillUpAmountWeights, :910). From skill 60.0 it's always 0.1.
+local AMOUNTS = {
+    [0] = { 85, 15 }, { 85, 15 }, { 85, 15 }, { 80, 20 }, { 80, 20 }, { 70, 30 }, { 70, 30 },
+    { 60, 40 }, { 60, 40 }, { 50, 40, 10 }, { 40, 40, 20 }, { 40, 40, 20 }, { 15, 45, 30, 10 },
+    { 10, 40, 25, 25 }, { 0, 40, 30, 20, 10 },
+};
+
+--[[
+* How many tries of a recipe it takes on average to raise `craft`: to the next level, and to the
+* level where the recipe stops giving skill-ups (its own level, or your rank's cap if that comes
+* first). Your skill is somewhere in lo..hi (tenths, as skill.range gives); every value in it is
+* taken as equally likely. Each try's chance and amount are worked out at the skill you'd be at
+* then, so the chance to succeed rises as you do. { next, cap, cap_level }, each nil when it
+* can't be reached; nil when the recipe gives no skill-ups now.
+--]]
+function odds.synths(r, craft, you, lo, hi)
+    if (odds.skillup(r, craft, you) <= 0) then
+        return nil;
+    end
+    local need, max = r[4][craft], (you.rank[craft] + 1) * 100;
+    local top = math.min(need * 10, max);
+    -- At skill x: the chance a try raises it, and the chances of each amount.
+    local at = { level = { }, bonus = you.bonus, rank = you.rank, capped = { } };
+    for c = 1, 8 do
+        at.level[c], at.capped[c] = you.level[c], false;
+    end
+    local q, w = { }, { };
+    for x = lo, top - 1 do
+        at.level[craft] = math.floor(x / 10);
+        q[x] = odds.skillup(r, craft, at);
+        w[x] = x < 600 and AMOUNTS[math.max(0, math.min(14, need - at.level[craft]))] or { 100 };
+    end
+    -- Tries from skill x to reach `goal`: E(x) = (1 + q * sum of w(a) * E(x + a)) / q.
+    local function from(goal)
+        local e = { };
+        for x = goal - 1, lo, -1 do
+            if (q[x] <= 0) then
+                e[x] = math.huge;
+            else
+                local sum = 0;
+                for a, weight in ipairs(w[x]) do
+                    if (weight > 0 and x + a < goal) then
+                        sum = sum + weight / 100 * e[x + a];
+                    end
+                end
+                e[x] = (1 + q[x] * sum) / q[x];
+            end
+        end
+        local total = 0;
+        for x = lo, hi do
+            total = total + (x < goal and e[x] or 0);
+        end
+        total = total / (hi - lo + 1);
+        return total < math.huge and total or nil;
+    end
+    return { next = from(math.min((math.floor(lo / 10) + 1) * 10, top)), cap = from(top), cap_level = math.floor(top / 10) };
+end
+
 -- How often a failed try loses a material, 0-1 (handleMaterialLoss, :825).
 function odds.loss_rate(item)
     local base = odds.loss[item] or LOSS;

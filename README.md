@@ -5,7 +5,7 @@ Every era synthesis and desynthesis recipe on PhoenixXI, by craft, for Ashita v4
 - Pick a recipe to see its materials and results, with your odds at your craft levels:
   - success;
   - HQ, with the next HQ bracket and the level it starts at;
-  - skill-up chance.
+  - skill-up chance, and how many synths it takes on average to reach your next level and the level where the recipe stops giving skill-ups.
 - Names are coloured by how hard the recipe is for you.
 - Skill-up mode lists only the recipes that can raise the craft.
 - Type in AH prices to see the profit a try, selling on the AH or to an NPC. The profit is broken down into NQ, each HQ and a break. A price typed once is used by every recipe and every character.
@@ -93,6 +93,8 @@ HQ is capped at 80%.
 - Only from recipes above your level, and not once you're at your rank's cap.
 - 60% a success under level 50, 25% from 50, and 5% for desynthesis.
 - A break gives half that (desynthesis all of it), and only when the recipe is 1-5 levels above you.
+- A skill-up is 0.1 to 0.5, bigger the further the recipe is above you; always 0.1 from skill 60.0.
+- **Synths on average** to your next level and to where the recipe stops (its level, or your rank's cap if that comes first) are worked out from these at every tenth on the way, so the rising success rate and shrinking skill-ups are counted. When your tenths aren't known exactly, it's averaged over the range they could be in. Hover it to see which.
 
 **Profit a try** is what the results sell for, weighted by their chances, less what you use up on average: the crystal, and the materials in full on a success or at their loss rate on a break.
 
@@ -107,7 +109,7 @@ Look at an item's price history at the auction house and allrecipes keeps it. An
 - **Hover a price box** to see the sales behind it.
 - **Your own price** always wins; empty the box to use the AH's again.
 
-It never asks the server for anything. The history comes from the game's search server over its own connection, where no packet event can see it. So allrecipes reads it from the game's memory after the game has received it for you. When you open the auction house, it looks through memory in the background for the layout of a history or a category list (known from `src/search/packets/`) until it finds where the game keeps them. Browsing any category is usually enough. After that it watches those spots, and looks again every 10 seconds while you're there, since the game sometimes moves where it keeps the next one. All of this is through `ReadProcessMemory`, so memory the game frees can't crash it.
+It never asks the server for anything. The history comes from the game's search server over its own connection, where no packet event can see it. So allrecipes reads it from the game's memory after the game has received it for you. When you open the auction house, it looks through memory in the background for the layout of a history or a category list (known from `src/search/packets/`) until it finds where the game keeps them. Browsing any category is usually enough. After that it watches those spots, and looks again every 10 seconds while you're there, since the game sometimes moves where it keeps the next one. Looking takes at most half a millisecond a frame, so it doesn't cost frame rate. All of this is through `ReadProcessMemory`, so memory the game frees can't crash it.
 
 | Command | |
 |---|---|

@@ -529,6 +529,9 @@ local function missing(r, you, mode)
     return need;
 end
 
+-- The last synths estimate (odds.synths) and what it was for, so it isn't worked out every frame.
+local synths_key, synths_val = nil, nil;
+
 local function detail(s, you, r)
     local craft = s.craft;
     local desynth = r[2] == 1;
@@ -607,6 +610,33 @@ local function detail(s, you, r)
                 dim('No skill-ups: you\'re at or over it.');
             else
                 dim('No skill-ups: too hard to succeed.');
+            end
+        else
+            local lo, hi = skill.range(s.skill, craft, you);
+            local key = ('%s:%d:%d:%d'):fmt(tostring(r[1]), craft, lo, hi);
+            for c = 1, 8 do
+                key = key .. (':%d+%d'):fmt(you.level[c] or 0, you.bonus[c] or 0);
+            end
+            if (synths_key ~= key) then
+                synths_key, synths_val = key, odds.synths(r, craft, you, lo, hi);
+            end
+            local n = synths_val;
+            if (n ~= nil and (n.next ~= nil or n.cap ~= nil)) then
+                local name, parts = player.CRAFTS[craft].name, { };
+                local function about(v) return v < 10 and ('%.1f'):fmt(v) or ('%d'):fmt(math.floor(v + 0.5)); end
+                local next_level = math.floor(lo / 10) + 1;
+                if (n.next ~= nil) then
+                    parts[#parts + 1] = ('%s to %s %d'):fmt(about(n.next), name, next_level);
+                end
+                if (n.cap ~= nil and n.cap_level > next_level) then
+                    parts[#parts + 1] = ('%s to %d, %s'):fmt(about(n.cap), n.cap_level, n.cap_level < r[4][craft] and 'your rank\'s cap' or 'where it stops');
+                end
+                dim(('Synths on average: %s'):fmt(table.concat(parts, ', ')));
+                if (imgui.IsItemHovered()) then
+                    imgui.SetTooltip(('Worked out from Phoenix\'s skill-up rules at every tenth on the way: the chance\nrises as you do, and big gaps give bigger skill-ups. %s'):fmt(
+                        lo == hi and ('From your %s at %s.'):fmt(name, skill.fmt(lo))
+                        or ('Your tenths aren\'t known exactly, so it\'s averaged over %s to %s.'):fmt(skill.fmt(lo), skill.fmt(hi))));
+                end
             end
         end
     end

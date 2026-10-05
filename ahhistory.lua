@@ -51,7 +51,8 @@ local OVERLAP = 0x20;      -- chunks overlap so a packet across a boundary isn't
 local SPAN    = 2 + 0x16 + 40 * 10;  -- the most a packet takes from its 0x08 byte
 -- What's looked for: the first two bytes, found plainly (fast), then the whole pattern there.
 local LOOK_FOR = { { '\128\133', '^' .. ah.PATTERN }, { '\128\149', '^' .. ah.LIST_PATTERN } };
-local STEP    = 4 * CHUNK;             -- looked through a frame, so looking doesn't stall the game
+local SLICE   = 0x40000;               -- read at a time while looking in the background
+local FRAME_BUDGET = 0.0005;           -- seconds of looking a frame, so it doesn't cost frame rate
 local ARM_FOR     = 600;   -- seconds after the auction house opens
 local POLL_EVERY  = 0.2;
 local SCAN_EVERY  = 5;
@@ -72,10 +73,22 @@ local function kernel()
             size_t __stdcall VirtualQuery(const void* address, ar_mbi_t* info, size_t length);
             void* __stdcall GetCurrentProcess(void);
             int __stdcall ReadProcessMemory(void* process, const void* address, void* buffer, size_t size, size_t* read);
+            int __stdcall QueryPerformanceCounter(int64_t* count);
+            int __stdcall QueryPerformanceFrequency(int64_t* freq);
         ]]);
-        win = { ffi = ffi, buf = ffi.new('uint8_t[?]', CHUNK), got = ffi.new('size_t[1]'), process = ffi.C.GetCurrentProcess() };
+        win = { ffi = ffi, buf = ffi.new('uint8_t[?]', CHUNK), got = ffi.new('size_t[1]'), process = ffi.C.GetCurrentProcess(),
+                qpc = ffi.new('int64_t[1]') };
+        ffi.C.QueryPerformanceFrequency(win.qpc);
+        win.freq = tonumber(win.qpc[0]);
     end
     return win;
+end
+
+-- Seconds, finely (os.clock only goes in milliseconds on Windows).
+function ah.timer()
+    local k = kernel();
+    k.ffi.C.QueryPerformanceCounter(k.qpc);
+    return tonumber(k.qpc[0]) / k.freq;
 end
 
 --[[
@@ -477,7 +490,7 @@ end
 
 --[[
 * A look through the game's memory for history or AH list packets: { regions, ri (the region
-* at), off (how far into it), found, known }. It goes a few MB a frame (STEP) so the game doesn't stall.
+* at), off (how far into it), found, known }. It goes FRAME_BUDGET a frame so the game doesn't stall.
 --]]
 local function job_start()
     local ok, regions = pcall(ah.regions);
@@ -489,14 +502,17 @@ local function job_start()
     return { regions = regions, ri = 1, off = 0, found = { }, known = { } };
 end
 
--- Look through up to `budget` more bytes; true when the look is over.
-local function job_step(job, budget)
-    while (budget > 0) do
+-- Look through more of memory, until `deadline` (ah.timer) when there is one; true when the look
+-- is over. At least one slice is looked through each time.
+local function job_step(job, deadline)
+    local first = true;
+    while (first or deadline == nil or ah.timer() < deadline) do
+        first = false;
         local r = job.regions[job.ri];
         if (r == nil or #job.found >= 32) then
             return true;
         end
-        local n = math.min(CHUNK, r[2] - job.off);
+        local n = math.min(deadline ~= nil and SLICE or CHUNK, r[2] - job.off);
         local chunk = n > 0 and ah.read(r[1] + job.off, n) or nil;
         if (chunk ~= nil) then
             for _, look in ipairs(LOOK_FOR) do
@@ -517,7 +533,6 @@ local function job_step(job, budget)
                 end
             end
         end
-        budget = budget - math.max(n, 1);
         if (job.off + n >= r[2]) then
             job.ri, job.off = job.ri + 1, 0;
         else
@@ -560,7 +575,7 @@ function ah.scan()
     if (job == nil) then
         return 0;
     end
-    job_step(job, math.huge);
+    job_step(job, nil);
     return job_finish(job);
 end
 
@@ -582,7 +597,7 @@ function ah.tick(now)
     if (ah.job == nil and now >= ah.next_scan and (#ah.spots > 0 or ah.scans < SCANS)) then
         ah.job = job_start();
     end
-    if (ah.job ~= nil and job_step(ah.job, STEP)) then
+    if (ah.job ~= nil and job_step(ah.job, ah.timer() + FRAME_BUDGET)) then
         local job = ah.job;
         ah.job = nil;
         job_finish(job);
