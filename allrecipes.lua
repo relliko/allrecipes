@@ -22,7 +22,7 @@
 
 addon.name    = 'allrecipes';
 addon.author  = 'Relli';
-addon.version = '0.4';
+addon.version = '0.4.1';
 addon.desc    = 'Every era recipe by craft, with your odds, skill-ups, HQ rates and profit.';
 addon.link    = 'https://github.com/relliko/allrecipes';
 
@@ -48,6 +48,7 @@ local defaults = T{
     expansions = T{ ROTZ = true, COP = true, TOAU = true, WOTG = false },
     sub        = true,    -- list recipes where the craft is only a sub-craft
     keyitems   = true,    -- list recipes that need a key item
+    makeable   = false,   -- list only recipes you can make now (every craft high enough, key item had)
     gear       = T{ 0, 0, 0, 0, 0, 0, 0, 0 },  -- skill added by gear or moghancements, by craft
     sort       = 'lv',
     dir        = 1,

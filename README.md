@@ -35,7 +35,7 @@ Nothing is ever sent to the server and nothing is asked of it: allrecipes only r
 - **The icon row:** the minimized windows of deeps, droptables and scouter (its map and compass) sit in the same row. The addons tell each other which icons are showing through Ashita's plugin events, which stay inside your game. When one icon goes, the other slides over.
 - **Craft chips** show your level in each craft, to the tenth once it's known. The one you're on is shown big, with its tenths beside it, your rank and how far you are toward its cap. See [Your skill to the tenth](#your-skill-to-the-tenth).
 - **Crystals:** at the top right, the eight crystals with how many of each are in your inventory, in the game's own icons. The one the recipe shown needs is outlined, its count in red if you have none. Hover one to see its clusters and HQ crystals (Inferno Crystal and the like) too. In a narrow window they go in two rows, or under your level.
-- **Toolbar:** switch between synthesis and desynthesis, all recipes or skill-ups, and selling on the AH or to an NPC.
+- **Toolbar:** switch between synthesis and desynthesis, all recipes or skill-ups, and selling on the AH or to an NPC. **can make** hides recipes you can't make now: too low in any craft they use (sub-crafts included) to start them, sure to break, or missing their key item.
 - **Settings chip:** opens a settings window where you can:
   - pick the theme: clean (scouter's), guild (warm leather and gold) or Vana'diel (the game's blue menus);
   - hide expansions;

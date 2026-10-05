@@ -351,6 +351,10 @@ local function toolbar(s)
     if (chip('##ar_desynth', 'desynthesis', s.desynth)) then s.desynth, ui.dirty = true, true; end
     if (chip('##ar_all', 'all recipes', not s.skillups, nil, 16)) then s.skillups, ui.dirty = false, true; end
     if (chip('##ar_ups', 'skill-ups', s.skillups, 'good')) then s.skillups, ui.dirty = true, true; end
+    if (chip('##ar_make', 'can make', s.makeable, 'good', 8)) then s.makeable, ui.dirty = not s.makeable, true; end
+    if (imgui.IsItemHovered()) then
+        imgui.SetTooltip('Only recipes you can make now: high enough in every craft it uses\n(sub-crafts too) to start it, not sure to break, and with its key item.');
+    end
     if (chip('##ar_ah', 'sell on AH', s.sell == 'AH', nil, 16)) then s.sell, ui.dirty = 'AH', true; end
     if (chip('##ar_npc', 'sell to NPC', s.sell == 'NPC')) then s.sell, ui.dirty = 'NPC', true; end
     imgui.SameLine(0, 16);

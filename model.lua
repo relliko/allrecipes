@@ -6,6 +6,7 @@
 
 local odds   = require('odds');
 local prices = require('prices');
+local player = require('player');
 
 local model = {
     recipes = nil,  -- data/recipes.lua
@@ -97,13 +98,27 @@ function model.main_craft(r)
     return best;
 end
 
+--[[
+* Whether you can make a recipe now: you're high enough in every craft it uses to start it, it
+* isn't sure to break, and you have its key item. o is odds.odds for it, when already worked out.
+--]]
+function model.makeable(r, you, o)
+    if (not odds.can_try(r, you)) then
+        return false;
+    end
+    if ((o or odds.odds(r, you)).p <= 0) then
+        return false;
+    end
+    return r[3] == 0 or player.has_key_item(r[3]);
+end
+
 function model.tag(r)
     return SHORT_TAG[r[8]];
 end
 
 -- Everything the list depends on, as one string.
 local function stamp(s, you, craft)
-    local parts = { craft, s.desynth and 1 or 0, s.skillups and 1 or 0, s.sell, s.sub and 1 or 0, s.keyitems and 1 or 0,
+    local parts = { craft, s.desynth and 1 or 0, s.skillups and 1 or 0, s.sell, s.sub and 1 or 0, s.keyitems and 1 or 0, s.makeable and 1 or 0,
                     s.sort, s.dir, s.search or '', prices.version };
     for _, e in ipairs(model.EXPANSIONS) do
         parts[#parts + 1] = s.expansions[e.tag] and 1 or 0;
@@ -140,8 +155,9 @@ function model.rows(s, you, craft)
         if ((tag == '' or s.expansions[tag]) and (s.sub or not sub) and (s.keyitems or r[3] == 0)) then
             local title = model.title(r);
             local up = odds.skillup(r, craft, you);
-            if ((search == '' or title:lower():find(search, 1, true) ~= nil) and (not s.skillups or up > 0)) then
-                local o = odds.odds(r, you);
+            local o = odds.odds(r, you);
+            if ((search == '' or title:lower():find(search, 1, true) ~= nil) and (not s.skillups or up > 0)
+                and (not s.makeable or model.makeable(r, you, o))) then
                 out[#out + 1] = {
                     r = r, lv = r[4][craft], title = title, band = odds.band(r, you), p = o.p,
                     hq = o.tiers[2] + o.tiers[3] + o.tiers[4], up = up, sub = sub, tag = model.tag(r), ki = r[3] ~= 0,
