@@ -10,6 +10,8 @@ Every era synthesis and desynthesis recipe on PhoenixXI, by craft, for Ashita v4
 - Skill-up mode lists only the recipes that can raise the craft.
 - Type in AH prices to see the profit a try, selling on the AH or to an NPC. The profit is broken down into NQ, each HQ and a break. A price typed once is used by every recipe and every character.
 - Ctrl+click any item to open its page on ffxiah.com, and from there whichever wiki you like.
+- Your craft levels show to the tenth (22.4), worked out from your skill-up messages.
+- The crystals in your inventory are counted at the top of the window.
 
 Nothing is ever sent to the server and nothing is asked of it: allrecipes only reads client memory and the packets the game receives anyway. Phoenix only allows tools on its [approved addon list](https://phoenix-xi.com/approved-addons), so check it's there before using it on the server.
 
@@ -26,12 +28,13 @@ Nothing is ever sent to the server and nothing is asked of it: allrecipes only r
 | `/ar prices export [file]` | save your prices as JSON (`prices.json` in `config/addons/allrecipes`) |
 | `/ar prices import <file>` | add prices from JSON |
 | `/ar reset` | move the window back to where it starts |
-| `/ar debug` | your craft levels, ranks and image support as the addon reads them |
+| `/ar debug` | your craft levels (with their tenths), ranks and image support as the addon reads them |
 
 **In the window** (it looks like scouter's):
 - **Minimize:** the `–` where the close button would be shrinks the window to a small crystal icon at the bottom right of the screen. The icon is as tall as the points addon's compact bar, twice as wide, and scales with your menu resolution the same way. Click it to bring the window back; `/ar` hides the window altogether. It stays minimized when you reload.
-- **The icon row:** the minimized windows of deeps, droptables and scouter (its map and compass) sit in the same row. The two addons tell each other which icons are showing through Ashita's plugin events, which stay inside your game. When one icon goes, the other slides over.
-- **Craft chips** show your level in each craft. The one you're on is shown big, with your rank and how far you are toward its cap.
+- **The icon row:** the minimized windows of deeps, droptables and scouter (its map and compass) sit in the same row. The addons tell each other which icons are showing through Ashita's plugin events, which stay inside your game. When one icon goes, the other slides over.
+- **Craft chips** show your level in each craft, to the tenth once it's known. The one you're on is shown big, with its tenths beside it, your rank and how far you are toward its cap. See [Your skill to the tenth](#your-skill-to-the-tenth).
+- **Crystals:** at the top right, the eight crystals with how many of each are in your inventory, in the game's own icons. The one the recipe shown needs is outlined, its count in red if you have none. Hover one to see its clusters and HQ crystals (Inferno Crystal and the like) too. In a narrow window they go in two rows, or under your level.
 - **Toolbar:** switch between synthesis and desynthesis, all recipes or skill-ups, and selling on the AH or to an NPC.
 - **Settings chip:** opens a settings window where you can:
   - pick the theme: clean (scouter's), guild (warm leather and gold) or Vana'diel (the game's blue menus);
@@ -43,6 +46,14 @@ Nothing is ever sent to the server and nothing is asked of it: allrecipes only r
 - **Tooltips:** hover over a profit in the list to see how it adds up.
 
 Image support counts toward your odds. It starts at +1. If it's still up after 2 minutes it must be advanced support or a guild belt, so it turns +3 by itself. Click the image support button to change it by hand.
+
+## Your skill to the tenth
+The server keeps craft skill in tenths but only tells your client whole levels. Every skill-up does come with a message, though: "skill rises 0.3 points", and "reaches level 23" when that crosses a level. allrecipes reads those (only reads; they're the packets the game receives anyway) and keeps your skill as a range that each skill-up narrows:
+- `.?` beside your level: nothing seen yet, so it could be anything from .0 to .9;
+- `.3-.9`: narrowed by a skill-up or two;
+- `.3`, in the accent colour: exact. That happens when a 0.1 skill-up crosses a level, or when you're capped (the server stops a skill-up at the cap).
+
+Hover the tenths to see what they are. A skill that drops (specialization) goes down with it. If your level changes without a message being seen (a skill-up while the addon wasn't loaded), it starts over from the new level. The ranges are kept for each character in its settings.
 
 ## Which recipes
 The recipes come from Phoenix's own recipe table, through `data/recipes.lua`.

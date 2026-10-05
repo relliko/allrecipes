@@ -206,14 +206,17 @@ function style.bar(width, fraction, key)
     imgui.Dummy({ width, 13 });
 end
 
--- Large text at the cursor (the font drawn bigger), reserving its space.
-function style.big(text, color, size)
+-- Large text at the cursor (the font drawn bigger), reserving its space. With `line`, the size
+-- of bigger text beside it, it sits on that text's baseline.
+function style.big(text, color, size, line)
     local dl = imgui.GetWindowDrawList();
     local x, y = imgui.GetCursorScreenPos();
     local w, h = imgui.CalcTextSize(text);
-    local k = size / math.max(imgui.GetFontSize(), 1);
-    dl:AddText(imgui.GetFont(), size, { x, y }, color, text);
-    imgui.Dummy({ w * k, h * k });
+    local fs = math.max(imgui.GetFontSize(), 1);
+    local k = size / fs;
+    local drop = line ~= nil and math.floor((line - size) * 0.8 + 0.5) or 0;
+    dl:AddText(imgui.GetFont(), size, { x, y + drop }, color, text);
+    imgui.Dummy({ w * k, h * (line or size) / fs });
 end
 
 -- A small dot at the cursor, as tall as a line of text, reserving its space.

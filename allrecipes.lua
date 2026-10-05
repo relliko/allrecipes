@@ -13,15 +13,18 @@
 * When you look at an item's price history at the auction house, it's kept (ahhistory.lua) and
 * used for any price you haven't typed in.
 *
+* Your craft levels show to the tenth once your skill-up messages have told it (skill.lua), and
+* the crystals in your inventory are counted at the top.
+*
 * Nothing is ever sent to the server and nothing is asked of it: allrecipes only reads client
 * memory and the packets the game receives anyway.
 --]]
 
 addon.name    = 'allrecipes';
 addon.author  = 'Relli';
-addon.version = '0.2.1';
+addon.version = '0.3';
 addon.desc    = 'Every era recipe by craft, with your odds, skill-ups, HQ rates and profit.';
-addon.link    = '';
+addon.link    = 'https://github.com/relliko/allrecipes';
 
 require('common');
 local chat     = require('chat');
@@ -32,6 +35,7 @@ local prices   = require('prices');
 local ui       = require('ui');
 local ah       = require('ahhistory');
 local tray     = require('tray');
+local skill    = require('skill');
 
 local defaults = T{
     visible    = false,
@@ -53,6 +57,8 @@ local defaults = T{
     theme      = 'clean', -- 'clean' (scouter's), 'guild' or 'vanadiel'
     ahread     = true,    -- keep the AH price history of what you look at
     ahbasis    = 'single',-- where an item has both, its AH price comes from 'single' or 'stack' sales
+    -- Each craft's skill in tenths, as a range (skill.lua); -1 not known yet. Per character.
+    skill      = T{ lo = T{ -1, -1, -1, -1, -1, -1, -1, -1 }, hi = T{ -1, -1, -1, -1, -1, -1, -1, -1 } },
 };
 
 local ar = { settings = nil };
@@ -67,6 +73,23 @@ end
 
 local function save()
     settings.save();
+end
+
+-- Settings from an older version, or edited by hand: the skill ranges as skill.lua needs them.
+local function fix(s)
+    if (type(s.skill) ~= 'table') then
+        s.skill = T{ };
+    end
+    for _, k in ipairs({ 'lo', 'hi' }) do
+        if (type(s.skill[k]) ~= 'table') then
+            s.skill[k] = T{ };
+        end
+        for c = 1, 8 do
+            if (type(s.skill[k][c]) ~= 'number') then
+                s.skill[k][c] = -1;
+            end
+        end
+    end
 end
 
 local CRAFT_NAMES = {
@@ -84,14 +107,17 @@ local function help()
     msg('/ar ah   whether AH price history is being kept, and how much');
     msg('/ar ah on|off   keep the AH price history of what you look at (only read, never asked for)');
     msg('/ar ah scan   look for it in memory now, with a price history open at the auction house');
-    msg('/ar debug   your craft levels as the addon reads them');
+    msg('/ar debug   your craft levels (and tenths) as the addon reads them');
 end
 
 local function debug()
     local you = player.you(ar.settings.gear);
     for c, craft in ipairs(player.CRAFTS) do
         local im = player.imagery[c];
-        msg(('%s: level %d, rank %d (%s), %s%s'):fmt(craft.name, you.level[c], you.rank[c], player.RANKS[you.rank[c]] or '?',
+        local lo, hi = skill.range(ar.settings.skill, c, you);
+        local known = skill.known(lo, hi);
+        local tenth = known == 'exact' and skill.fmt(lo) or known == 'some' and ('%s-%s'):fmt(skill.fmt(lo), skill.fmt(hi)) or ('%d.?'):fmt(you.level[c]);
+        msg(('%s: level %d (%s), rank %d (%s), %s%s'):fmt(craft.name, you.level[c], tenth, you.rank[c], player.RANKS[you.rank[c]] or '?',
             you.capped[c] and 'capped' or 'not capped', im and (', image support +%d'):fmt(im.power) or ''));
     end
     local n, synth = 0, 0;
@@ -109,6 +135,8 @@ end
 
 ashita.events.register('load', 'allrecipes_load', function ()
     ar.settings = settings.load(defaults);
+    fix(ar.settings);
+    skill.reset();
     tray.init('allrecipes');
     ui.search[1] = ar.settings.search or '';
     if (not model.load()) then
@@ -129,6 +157,8 @@ end);
 settings.register('settings', 'allrecipes_settings_update', function (s)
     if (s ~= nil) then
         ar.settings = s;
+        fix(s);
+        skill.reset();
         ui.search[1] = s.search or '';
     end
 end);
@@ -218,10 +248,13 @@ ashita.events.register('command', 'allrecipes_command', function (e)
     end
 end);
 
--- The auction house opened (the server's 0x04C): watch for price histories. Only read.
+-- The auction house opened (the server's 0x04C): watch for price histories. A battle message
+-- (0x029): a skill-up, for the tenths. Only read.
 ashita.events.register('packet_in', 'allrecipes_packet_in', function (e)
     if (e.id == 0x04C) then
         ah.arm(os.clock());
+    elseif (e.id == 0x029 and ar.settings ~= nil) then
+        skill.packet(ar.settings.skill, e.data, player.id(), player.you(ar.settings.gear), os.clock());
     end
 end);
 
@@ -239,12 +272,18 @@ ashita.events.register('d3d_present', 'allrecipes_present', function ()
         prices.touch();
     end
     ah.tick(now);
+    local you = player.you(s.gear);
+    skill.sync(s.skill, you, now);
+    if (skill.dirty) then
+        skill.dirty = false;
+        save();
+    end
     if (s.visible and s.minimized) then
         ui.draw_icon(s, save);
         return;
     end
     tray.hide('allrecipes');
     if (s.visible) then
-        ui.draw(s, player.you(s.gear), save);
+        ui.draw(s, you, save);
     end
 end);

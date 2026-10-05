@@ -1,7 +1,8 @@
 --[[
 * allrecipes - ui
-* The window, in scouter's look (style.lua): craft chips, your level, the recipe list and the
-* chosen recipe's materials, odds and prices; and a settings window.
+* The window, in scouter's look (style.lua): craft chips, your level (to the tenth where it's
+* known), the crystals you have, the recipe list and the chosen recipe's materials, odds and
+* prices; and a settings window.
 --]]
 
 local imgui  = require('imgui');
@@ -12,6 +13,8 @@ local model  = require('model');
 local style  = require('style');
 local ah     = require('ahhistory');
 local tray   = require('tray');
+local skill  = require('skill');
+local icons  = require('icons');
 
 local ui = {
     reset   = false,  -- put the window back where it starts next frame
@@ -162,13 +165,138 @@ local function chip(id, text, on, key, gap)
     return style.chip(id, text, on, key);
 end
 
--- The craft chips, and your level in the craft: rank, cap, image support, gear.
+-- What the tenths of a craft's skill show as, and say when hovered.
+local function tenths(c, lo, hi)
+    local name = player.CRAFTS[c].name;
+    local how = 'The game only tells your client whole levels; allrecipes works out the tenths from\nyour skill-up messages ("rises 0.3 points", "reaches level 23").';
+    local known = skill.known(lo, hi);
+    if (known == 'exact') then
+        return ('.%d'):fmt(lo % 10), 'accent', ('%s %s.\n%s'):fmt(name, skill.fmt(lo), how);
+    elseif (known == 'some') then
+        return ('.%d-.%d'):fmt(lo % 10, hi % 10), 'dim',
+            ('%s is between %s and %s: each skill-up narrows it down.\n%s'):fmt(name, skill.fmt(lo), skill.fmt(hi), how);
+    end
+    return '.?', 'dim', ('The tenths of %s aren\'t known yet.\n%s\nThey show after a skill-up or two.'):fmt(name, how);
+end
+
+-- The crystals in your inventory: an icon and a count for each of the eight, the one the recipe
+-- shown needs picked out. Hovered, what's there (clusters and HQ crystals too).
+local CELL_GAP = 10;
+local function crystal_cells(s)
+    local counts = player.crystals(os.clock());
+    local sel = model.index ~= nil and model.index[s.selected] or nil;
+    local need = sel ~= nil and sel[5] or nil;
+    local size = math.floor(imgui.GetFontSize() + 4);
+    local cells = { };
+    for _, e in ipairs(player.CRYSTALS) do
+        local n = counts[e.id] or 0;
+        local text = tostring(n);
+        local tw = imgui.CalcTextSize(text);
+        cells[#cells + 1] = { e = e, n = n, text = text, w = size + 3 + tw, size = size, need = e.id == need,
+                              cluster = counts[e.id + player.CLUSTER] or 0, hq = counts[e.id + player.HQ] or 0 };
+    end
+    return cells;
+end
+
+-- A crystal where no icon can be had: a long diamond in its element's colour.
+local function crystal_shape(dl, x, y, size, rgb)
+    local col = 0xFF000000 + rgb[3] * 65536 + rgb[2] * 256 + rgb[1];
+    local cx, hw = x + size / 2, size * 0.26;
+    local top, mid, bottom = y + size * 0.08, y + size * 0.45, y + size * 0.92;
+    dl:AddTriangleFilled({ cx, top }, { cx - hw, mid }, { cx, bottom }, col);
+    dl:AddTriangleFilled({ cx, top }, { cx, bottom }, { cx + hw, mid }, bit.bor(bit.band(col, 0x00FFFFFF), 0x99000000));
+end
+
+local function crystal_cell(dl, x, y, cell)
+    local size = cell.size;
+    if (cell.need) then
+        dl:AddRectFilled({ x - 3, y - 2 }, { x + cell.w + 3, y + size + 2 }, style.col('accent', 40), 4, ImDrawFlags_RoundCornersAll);
+        dl:AddRect({ x - 3, y - 2 }, { x + cell.w + 3, y + size + 2 }, style.col('accent', 150), 4, ImDrawFlags_RoundCornersAll, 1);
+    end
+    local tex = icons.get(cell.e.id);
+    if (tex ~= nil) then
+        dl:AddImage(tex, { x, y }, { x + size, y + size });
+    else
+        crystal_shape(dl, x, y, size, cell.e.rgb);
+    end
+    local _, th = imgui.CalcTextSize(cell.text);
+    local key = cell.n > 0 and 'text' or (cell.need and 'bad' or 'dim');
+    dl:AddText({ x + size + 3, y + (size - th) / 2 }, style.col(key), cell.text);
+    imgui.SetCursorScreenPos({ x, y });
+    imgui.InvisibleButton('##ar_crystal_' .. cell.e.element, { cell.w, size });
+    if (imgui.IsItemHovered()) then
+        local name = model.name(cell.e.id);
+        local lines = { ('%s: %d in your inventory'):fmt(name, cell.n) };
+        if (cell.cluster > 0) then
+            lines[#lines + 1] = ('and %d %s (%d more when broken up)'):fmt(cell.cluster, model.name(cell.e.id + player.CLUSTER), cell.cluster * 12);
+        end
+        if (cell.hq > 0) then
+            lines[#lines + 1] = ('and %d %s (synthesizes the same)'):fmt(cell.hq, model.name(cell.e.id + player.HQ));
+        end
+        if (cell.need) then
+            lines[#lines + 1] = cell.n > 0 and 'The recipe shown uses one.' or 'The recipe shown needs one.';
+        end
+        imgui.SetTooltip(table.concat(lines, '\n'));
+    end
+end
+
+-- The row, from (x, y), in rows of `per`; returns its width and height.
+local function crystal_row(dl, cells, x, y, per, draw)
+    local widths = { };
+    for i, cell in ipairs(cells) do
+        local col = (i - 1) % per + 1;
+        widths[col] = math.max(widths[col] or 0, cell.w);
+    end
+    local total = -CELL_GAP;
+    for _, w in ipairs(widths) do
+        total = total + w + CELL_GAP;
+    end
+    local rows = math.ceil(#cells / per);
+    local step = cells[1].size + 6;
+    if (draw) then
+        for i, cell in ipairs(cells) do
+            local col, row = (i - 1) % per + 1, math.floor((i - 1) / per);
+            local cx = x;
+            for k = 1, col - 1 do
+                cx = cx + widths[k] + CELL_GAP;
+            end
+            crystal_cell(dl, cx, y + row * step, cell);
+        end
+    end
+    return total, rows * step - 6;
+end
+
+-- The crystals at the top right of the level block: in one row where there's room beside it,
+-- two of four where not, and under it in a narrow window.
+local function crystals(s, left, top, right, group_right)
+    local dl = imgui.GetWindowDrawList();
+    local cells = crystal_cells(s);
+    local back_x, back_y = imgui.GetCursorScreenPos();
+    for _, per in ipairs({ 8, 4 }) do
+        local w = crystal_row(dl, cells, 0, 0, per, false);
+        if (right - w >= group_right + 16) then
+            crystal_row(dl, cells, right - w, top, per, true);
+            imgui.SetCursorScreenPos({ back_x, back_y });
+            ui.crystal_place = per == 8 and 'row' or 'two rows';
+            return;
+        end
+    end
+    local _, h = crystal_row(dl, cells, left, back_y + 2, 4, true);
+    imgui.SetCursorScreenPos({ back_x, back_y + h + 6 });
+    imgui.Dummy({ 1, 0 });
+    ui.crystal_place = 'under';
+end
+
+-- The craft chips, and your level in the craft (to the tenth where it's known): rank, cap,
+-- image support, gear; and the crystals you have.
 local function header(s, you)
     for c, craft in ipairs(player.CRAFTS) do
         if (c > 1) then
             imgui.SameLine(0, 4);
         end
-        if (style.chip(('##ar_craft%d'):fmt(c), ('%s %d'):fmt(craft.short, you.level[c]), s.craft == c)) then
+        local lo, hi = skill.range(s.skill, c, you);
+        local level = lo == hi and skill.fmt(lo) or tostring(you.level[c]);
+        if (style.chip(('##ar_craft%d'):fmt(c), ('%s %s'):fmt(craft.short, level), s.craft == c)) then
             s.craft, ui.scroll_top, ui.dirty = c, true, true;
         end
     end
@@ -176,15 +304,24 @@ local function header(s, you)
     local c = s.craft;
     local level, rank = you.level[c], you.rank[c];
     local cap = (rank + 1) * 10;
+    local lo, hi = skill.range(s.skill, c, you);
     imgui.Spacing();
+    local left, top = imgui.GetCursorScreenPos();
+    local right = left + imgui.GetContentRegionAvail();
     style.big(tostring(level), style.col('accent'), 30);
+    imgui.SameLine(0, 1);
+    local frac, key, tip = tenths(c, lo, hi);
+    style.big(frac, style.col(key), 18, 30);
+    if (imgui.IsItemHovered()) then
+        imgui.SetTooltip(tip);
+    end
     imgui.SameLine(0, 10);
     imgui.BeginGroup();
     imgui.TextColored(style.f('text'), player.CRAFTS[c].name);
     imgui.SameLine();
     dim(('%s, cap %d'):fmt(player.RANKS[rank] or '?', cap));
     local capped = you.capped[c] or level >= cap;
-    style.bar(160, capped and 1 or (level - rank * 10) / 10, capped and 'hq' or 'accent');
+    style.bar(160, capped and 1 or (lo / 10 - rank * 10) / 10, capped and 'hq' or 'accent');
     local im = player.imagery[c];
     if (im ~= nil) then
         if (style.chip('##ar_img', ('image support +%d'):fmt(im.power), true, 'hq')) then
@@ -205,6 +342,8 @@ local function header(s, you)
         style.tag('capped', 'hq');
     end
     imgui.EndGroup();
+    local group_right = imgui.GetItemRectMax();
+    crystals(s, left, top, right, group_right);
 end
 
 local function toolbar(s)

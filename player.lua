@@ -82,6 +82,48 @@ function player.you(gear)
     return you;
 end
 
+-- Your server id (0 at the character screen).
+function player.id()
+    local party = AshitaCore:GetMemoryManager():GetParty();
+    return party ~= nil and party:GetMemberServerId(0) or 0;
+end
+
+-- The eight crystals, in the game's order; each element's cluster is 8 on, its HQ crystal
+-- (Inferno ..., used the same in a synth, synthutils.cpp) 142 on. rgb stands in for the icon.
+player.CRYSTALS = {
+    { id = 4096, element = 'Fire',      rgb = { 232, 86, 64 } },
+    { id = 4097, element = 'Ice',       rgb = { 120, 196, 240 } },
+    { id = 4098, element = 'Wind',      rgb = { 104, 208, 120 } },
+    { id = 4099, element = 'Earth',     rgb = { 214, 172, 82 } },
+    { id = 4100, element = 'Lightning', rgb = { 176, 118, 232 } },
+    { id = 4101, element = 'Water',     rgb = { 76, 132, 236 } },
+    { id = 4102, element = 'Light',     rgb = { 244, 244, 236 } },
+    { id = 4103, element = 'Dark',      rgb = { 128, 108, 152 } },
+};
+player.CLUSTER, player.HQ = 8, 142;
+
+local held = { counts = { }, at = nil };
+local EVERY = 0.5;   -- seconds between looks through the inventory
+
+-- How many of each crystal, cluster and HQ crystal are in your inventory: [item id] = count.
+function player.crystals(now)
+    if (held.at ~= nil and now - held.at < EVERY and now >= held.at) then
+        return held.counts;
+    end
+    local counts = { };
+    local inv = AshitaCore:GetMemoryManager():GetInventory();
+    local max = inv ~= nil and (inv:GetContainerCountMax(0) or 0) or 0;
+    for i = 1, math.min(max, 80) do
+        local it = inv:GetContainerItem(0, i);
+        local id = it ~= nil and it.Id or 0;
+        if ((id >= 4096 and id <= 4111) or (id >= 4238 and id <= 4245)) then
+            counts[id] = (counts[id] or 0) + (it.Count or 0);
+        end
+    end
+    held.counts, held.at = counts, now;
+    return counts;
+end
+
 function player.has_key_item(id)
     local p = AshitaCore:GetMemoryManager():GetPlayer();
     return p ~= nil and p:HasKeyItem(id) == true;
