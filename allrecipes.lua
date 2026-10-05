@@ -22,7 +22,7 @@
 
 addon.name    = 'allrecipes';
 addon.author  = 'Relli';
-addon.version = '0.3';
+addon.version = '0.3.1';
 addon.desc    = 'Every era recipe by craft, with your odds, skill-ups, HQ rates and profit.';
 addon.link    = 'https://github.com/relliko/allrecipes';
 
@@ -151,6 +151,9 @@ ashita.events.register('load', 'allrecipes_load', function ()
     ah.load();
     if (ah.error ~= nil) then
         err(('Couldn\'t read the AH history (%s).'):fmt(ah.error));
+    end
+    if (prices.moved ~= nil or ah.moved ~= nil) then
+        msg('config/addons/allrecipes had files that aren\'t allrecipes\' saved data (a copy of the addon?). They\'re renamed to .bak and new ones will be kept. The addon goes in addons/allrecipes; the config folder is only for what it saves.');
     end
 end);
 

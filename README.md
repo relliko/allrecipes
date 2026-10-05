@@ -16,7 +16,7 @@ Every era synthesis and desynthesis recipe on PhoenixXI, by craft, for Ashita v4
 Nothing is ever sent to the server and nothing is asked of it: allrecipes only reads client memory and the packets the game receives anyway. Phoenix only allows tools on its [approved addon list](https://phoenix-xi.com/approved-addons), so check it's there before using it on the server.
 
 ## Installation
-- Copy the `allrecipes` folder into your Ashita v4 `addons` directory.
+- Copy the `allrecipes` folder into your Ashita v4 `addons` directory. From a release zip, extract it into the Ashita folder itself (the one with `addons` and `config` in it, `Game` on HorizonXI), not into `config`.
 - Type `/addon load allrecipes` in game, then `/ar` to open the window.
 
 ## Usage

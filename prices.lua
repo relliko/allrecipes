@@ -14,6 +14,7 @@ local prices = {
     dirty    = false,  -- changed since the last save
     saved    = 0,      -- when it was last saved (os.clock)
     error    = nil,    -- why the file didn't load
+    moved    = nil,    -- where a file that wasn't ours was moved to
     estimate = nil,    -- function (id): gil each from the AH history, or nil
 };
 
@@ -59,17 +60,45 @@ local function gil(v)
     return math.floor(v);
 end
 
+-- Reads one of allrecipes' saved data files: the table it returns, or nil and why it couldn't be read.
+-- A file there that isn't one of ours (it doesn't start with our header, like a copy of the addon's
+-- own code from unzipping into the config folder) is moved aside to <name>.bak and read as empty;
+-- moved is then the .bak's path, so the player can be told.
+function prices.read(path)
+    local f = io.open(path, 'r');
+    if (f == nil) then
+        return nil;
+    end
+    local first = f:read('*l') or '';
+    f:close();
+    if (not first:match('^%-%- allrecipes:')) then
+        local bak = path .. '.bak';
+        os.remove(bak);
+        os.rename(path, bak);
+        return nil, nil, bak;
+    end
+    local chunk, why = loadfile(path);
+    if (chunk == nil) then
+        return nil, tostring(why);
+    end
+    setfenv(chunk, { });  -- data only
+    local ok, t = pcall(chunk);
+    if (not ok) then
+        return nil, tostring(t);
+    end
+    if (type(t) ~= 'table') then
+        return nil, path:match('[^/\\]+$') .. ' did not return a table';
+    end
+    return t;
+end
+
 function prices.load()
     prices.list, prices.dirty, prices.error = { }, false, nil;
     prices.version = prices.version + 1;
-    local f = loadfile(file());
-    if (f == nil) then
-        return;
-    end
-    setfenv(f, { });  -- data only
-    local ok, t = pcall(f);
-    if (not ok or type(t) ~= 'table') then
-        prices.error = ok and 'prices.lua did not return a table' or tostring(t);
+    local t, why, moved = prices.read(file());
+    prices.moved = moved;
+    if (t == nil) then
+        prices.error = why;
         return;
     end
     for id, v in pairs(t) do

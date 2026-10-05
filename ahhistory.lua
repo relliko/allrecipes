@@ -516,14 +516,10 @@ end
 
 function ah.load()
     ah.data, ah.error = { }, nil;
-    local f = loadfile(file());
-    if (f == nil) then
-        return;
-    end
-    setfenv(f, { });
-    local ok, t = pcall(f);
-    if (not ok or type(t) ~= 'table') then
-        ah.error = ok and 'ahhistory.lua did not return a table' or tostring(t);
+    local t, why, moved = prices.read(file());
+    ah.moved = moved;
+    if (t == nil) then
+        ah.error = why;
         return;
     end
     for id, d in pairs(t) do
