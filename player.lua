@@ -163,4 +163,24 @@ function player.key_item_name(id)
     return (name ~= nil and name ~= '') and name or ('key item %d'):fmt(id);
 end
 
+-- Everything in your inventory (rods and bait for the fishing atlas): [item id] = count.
+local bag = { counts = { }, at = nil };
+function player.inventory(now)
+    if (bag.at ~= nil and now - bag.at < EVERY and now >= bag.at) then
+        return bag.counts;
+    end
+    local counts = { };
+    local inv = AshitaCore:GetMemoryManager():GetInventory();
+    local max = inv ~= nil and (inv:GetContainerCountMax(0) or 0) or 0;
+    for i = 1, math.min(max, 80) do
+        local it = inv:GetContainerItem(0, i);
+        local id = it ~= nil and it.Id or 0;
+        if (id ~= 0 and id ~= 65535) then
+            counts[id] = (counts[id] or 0) + (it.Count or 0);
+        end
+    end
+    bag.counts, bag.at = counts, now;
+    return counts;
+end
+
 return player;

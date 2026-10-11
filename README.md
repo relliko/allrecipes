@@ -59,7 +59,11 @@ Each fish has three levels. They come from Phoenix's skill-up code (`FishingSkil
 
 Pick a fish to see:
 - your skill-up chance on each catch, and how many catches it takes on average to reach your next level and the fish's cap;
+- the rods that hold it, plainest first, and what goes wrong with the ones that don't: the line snaps, the rod breaks, or the fish is too big or too small for the rod and gets away. These come from Phoenix's rules, using each fish's strength, each rod's ranks (with Phoenix's own changes to them) and your level, since every rod holds a little more within 10 levels of the fish. A large-fish rod on a small fish, or the other way round, also gets fewer bites;
 - the bait and lures it takes, and how well (best, good or bites);
+- **yours** beside any rod or bait in your inventory.
+
+Hover a fish in the list to see the least rod it needs and its best bait.
 - every zone and spot where it bites;
 - whether it's a large fish, needs a key item, or is legendary.
 

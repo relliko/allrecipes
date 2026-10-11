@@ -877,7 +877,32 @@ local function fish_toolbar(s)
     if (chip('##ar_cfg', 'settings', s.cfg, nil, 8)) then s.cfg, ui.dirty = not s.cfg, true; end
 end
 
-local function fish_list(s, rows, width, height)
+-- A fish's gear in short, for its row's tooltip: the least rods that hold it and its best bait.
+local function fish_gear(f, lv)
+    local rods, best = { }, nil;
+    for _, r in ipairs(fishing.rods_for(f, lv)) do
+        if (best == nil) then
+            best = r;
+        end
+        if (r.risk == best.risk and r.hook == best.hook and #rods < 3) then
+            rods[#rods + 1] = r.rod.name;
+        end
+    end
+    local lines = { f.name };
+    if (best ~= nil) then
+        lines[#lines + 1] = ('Rod: %s%s'):fmt(table.concat(rods, ', '), best.risk > 0 and (' (still loses it %s)'):fmt(model.pct(best.risk)) or ' or better');
+    end
+    local bait = { };
+    for i = 1, #f.bait, 2 do
+        if (f.bait[i + 1] == f.bait[2] and #bait < 3) then
+            bait[#bait + 1] = model.name(f.bait[i]);
+        end
+    end
+    lines[#lines + 1] = #bait > 0 and ('Bait: %s'):fmt(table.concat(bait, ', ')) or 'Bait: none listed';
+    return table.concat(lines, '\n');
+end
+
+local function fish_list(s, rows, width, height, lv)
     local today_r = width - 24;
     local up_r = today_r - 56;
     local tag_x = up_r - 50 - 84;
@@ -933,6 +958,9 @@ local function fish_list(s, rows, width, height)
             else
                 s.fishsel, ui.dirty = f.id, true;
             end
+        end
+        if (imgui.IsItemHovered()) then
+            imgui.SetTooltip(imgui.GetIO().KeyCtrl and ('Click: open %s on ffxiah.com'):fmt(f.name) or fish_gear(f, lv));
         end
         local function text(x, col, t)
             dl:AddText({ x0 + x, y0 }, col, t);
@@ -1052,6 +1080,47 @@ local function fish_detail(s, you, f)
         imgui.TextColored(style.f('good'), ('%d caught today'):fmt(today));
     end
 
+    -- The rods: the ones that hold it first, then the trouble with the rest.
+    local bag = player.inventory(os.clock());
+    local w = imgui.GetContentRegionAvail();
+    imgui.SeparatorText('Rods');
+    -- The four plainest that hold it and two that don't, and any you have.
+    local held, bad, more_held, more_bad = 0, 0, 0, 0;
+    for _, r in ipairs(fishing.rods_for(f, lv)) do
+        local ok = r.risk <= 0;
+        local show = bag[r.rod.id] ~= nil or (ok and held < 4) or (not ok and bad < 2);
+        if (not show) then
+            if (ok) then more_held = more_held + 1; else more_bad = more_bad + 1; end
+        else
+            if (ok) then held = held + 1; else bad = bad + 1; end
+            local parts = { };
+            if (r.why == 'big') then parts[#parts + 1] = ('too big for it: gets away %s'):fmt(model.pct(r.lose)); end
+            if (r.why == 'small') then parts[#parts + 1] = ('too small for it: let go %s'):fmt(model.pct(r.lose)); end
+            if (r.snap > 0) then parts[#parts + 1] = ('line snaps %s'):fmt(model.pct(r.snap)); end
+            if (r.brk > 0) then parts[#parts + 1] = ('rod breaks %s'):fmt(model.pct(r.brk)); end
+            if (#parts == 0) then
+                parts[1] = r.hook == 0 and 'holds it' or r.hook == 3 and 'holds it, fewer bites (a large-fish rod)' or 'holds it, fewer bites (a small-fish rod)';
+            end
+            local key = r.risk > 0 and (r.risk >= 0.25 and 'bad' or 'warn') or (r.hook == 0 and 'good' or 'text');
+            link(r.rod.id, r.rod.name, r.risk > 0 and 'dim' or 'text');
+            if (bag[r.rod.id] ~= nil) then
+                imgui.SameLine(0, 6);
+                style.tag('yours', 'hq');
+            end
+            imgui.SameLine(0, 10);
+            imgui.PushTextWrapPos(0);
+            imgui.TextColored(style.f(key), table.concat(parts, ', '));
+            imgui.PopTextWrapPos();
+        end
+    end
+    if (more_held > 0 or more_bad > 0) then
+        local parts = { };
+        if (more_held > 0) then parts[#parts + 1] = ('%d better rod%s hold%s it too'):fmt(more_held, more_held == 1 and '' or 's', more_held == 1 and 's' or ''); end
+        if (more_bad > 0) then parts[#parts + 1] = ('%d more lose%s it more often'):fmt(more_bad, more_bad == 1 and 's' or ''); end
+        dim(table.concat(parts, '; ') .. '.');
+    end
+    dim(('Worked out at your level (%d). Within 10 of it, every rod holds a little more.'):fmt(lv));
+
     imgui.SeparatorText('Bait and lures');
     if (#f.bait == 0) then
         dim('None listed: it only bites now and then, on anything.');
@@ -1059,8 +1128,11 @@ local function fish_detail(s, you, f)
         for i = 1, #f.bait, 2 do
             local id, power = f.bait[i], f.bait[i + 1];
             link(id, model.name(id));
-            imgui.SameLine(0, 8);
-            imgui.TextColored(style.f(power >= 3 and 'good' or power == 2 and 'text' or 'dim'), POWER[power] or '');
+            if (bag[id] ~= nil) then
+                imgui.SameLine(0, 6);
+                style.tag(('yours x%d'):fmt(bag[id]), 'hq');
+            end
+            right_text(w, power >= 3 and 'good' or power == 2 and 'text' or 'dim', POWER[power] or '');
         end
     end
 
@@ -1112,7 +1184,7 @@ local function fish_body(s, you)
     local lw = math.min(450, math.floor(aw * 0.55));
     local bodyh = math.max(80, ah - foot - head);
     imgui.BeginGroup();
-    fish_list(s, rows, lw, bodyh);
+    fish_list(s, rows, lw, bodyh, you.level[fishing.SKILL]);
     imgui.EndGroup();
     imgui.SameLine();
     imgui.BeginChild('ar_fdetail', { 0, bodyh + head }, ImGuiChildFlags_Borders);

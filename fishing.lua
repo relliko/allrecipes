@@ -67,7 +67,7 @@ function fishing.load()
         local row = {
             id = f[1], name = name ~= '' and name or f[2], lv = f[3], large = f[4] == 1, item = f[5] == 1,
             legendary = f[6] == 1, ki = f[7], quest = f[8] == 1, tag = f[9] ~= '' and f[9] or nil,
-            where = f[10], bait = f[11],
+            where = f[10], bait = f[11], rank = f[12] or 0,
         };
         row.start = math.max(0, row.lv - fishing.START);
         row.log = (item ~= nil and item.LogNameSingular ~= nil and item.LogNameSingular[1] or ''):lower();
@@ -75,8 +75,81 @@ function fishing.load()
         fishing.list[#fishing.list + 1] = row;
         fishing.index[row.id] = row;
     end
+    fishing.rods = { };
+    for _, r in ipairs(t.rods or { }) do
+        local item = res:GetItemById(r[1]);
+        local name = item ~= nil and item.Name ~= nil and item.Name[1] or '';
+        fishing.rods[#fishing.rods + 1] = { id = r[1], name = name ~= '' and name or r[2], large = r[3] == 1, min = r[4], max = r[5],
+                                            breakable = r[6] == 1, legendary = r[7] == 1, rating = r[8] };
+    end
     fishing.error, fishing.cache.stamp = nil, nil;
     return true;
+end
+
+--[[
+* How a rod does with a fish at your whole level `lv` (fishingutils.cpp: CalculateLoseChance,
+* CalculateSnapChance, CalculateBreakChance, CalculateHookChance). A fish's ranking is how
+* strong it is; a rod holds rankings up to its max_rank, and a large-fish rod lets go of small
+* fish ranked under its min_rank. +2 to what a rod holds when you're within 10 of the fish.
+*   lose  - it gets away, too big ('big') or too small ('small') for the rod;
+*   snap  - the line snaps;
+*   brk   - the rod breaks;
+*   hook  - bites lost to the wrong size of rod (3 for a fish smaller than it, 5 for bigger).
+* risk is the chance one of the first three happens.
+--]]
+function fishing.rod(row, rod, lv)
+    local fs, rs = row.large and 1 or 0, rod.large and 1 or 0;
+    local out = { lose = 0, why = nil, snap = 0, brk = 0, hook = 0 };
+    local near = lv + 10 > row.lv and 2 or 0;
+    if (not rod.legendary) then
+        if (fs > rs and row.rank > rod.max) then
+            out.lose, out.why = math.max(0, math.min(50, 50 + row.lv - lv)), 'big';
+        elseif (fs < rs and row.rank < rod.min) then
+            out.lose, out.why = math.max(0, math.min(50, 50 + row.lv - lv)), 'small';
+        end
+        out.hook = fs < rs and 3 or rs < fs and 5 or 0;
+    end
+    local pen = (not rod.legendary and fs > rs) and 2 or 0;
+    local bonus = 0;
+    if (row.legendary) then
+        if (rod.legendary) then bonus = 1; else pen = pen + 3; end
+    end
+    local hold = rod.max + near + bonus - pen;
+    if (row.rank > hold) then
+        out.snap = math.min(55, math.floor((row.rank - hold) * 8.5)) / 100;
+    end
+    if (rod.breakable) then
+        local bpen = (not rod.legendary and fs > rs) and 2 or 0;
+        local bbonus = (rod.legendary and fs == 1) and 1 or 0;
+        if (not rod.legendary and row.legendary) then
+            bpen = 5;
+        end
+        local over = row.rank - (rod.max + near + bbonus);
+        if (over > 0) then
+            out.brk = math.min(55, math.floor((over + bpen) * 1.3)) / 100;
+        end
+    end
+    out.lose = out.lose / 100;
+    out.risk = 1 - (1 - out.lose) * (1 - out.snap) * (1 - out.brk);
+    return out;
+end
+
+-- Every rod with how it does (fishing.rod): the ones that hold it first, the plainest of those
+-- first (the least rod it needs), then the rest by how often they lose it.
+function fishing.rods_for(row, lv)
+    local out = { };
+    for _, rod in ipairs(fishing.rods or { }) do
+        local r = fishing.rod(row, rod, lv);
+        r.rod = rod;
+        out[#out + 1] = r;
+    end
+    table.sort(out, function (a, b)
+        if (a.risk ~= b.risk) then return a.risk < b.risk; end
+        if (a.hook ~= b.hook) then return a.hook < b.hook; end
+        if (a.rod.rating ~= b.rod.rating) then return a.rod.rating < b.rod.rating; end
+        return a.rod.name < b.rod.name;
+    end);
+    return out;
 end
 
 --[[
