@@ -20,14 +20,17 @@
 * it stops giving skill-ups, where it bites and on what bait, and the fish you've caught today
 * (counted until midnight in Japan).
 *
+* The Harvest, Excavate, Log and Mine tabs (helm.lua) give each zone's drops and odds, with and
+* without gear, and its gathering points on the game's own map of the zone (zonemap.lua).
+*
 * Nothing is ever sent to the server and nothing is asked of it: allrecipes only reads client
 * memory and the packets the game receives anyway.
 --]]
 
 addon.name    = 'allrecipes';
 addon.author  = 'Relli';
-addon.version = '0.5.1';
-addon.desc    = 'Every era recipe by craft, with your odds, skill-ups, HQ rates and profit; and a fishing atlas.';
+addon.version = '0.6';
+addon.desc    = 'Every era recipe by craft, with your odds, skill-ups, HQ rates and profit; a fishing atlas; and HELM.';
 addon.link    = 'https://github.com/relliko/allrecipes';
 
 require('common');
@@ -41,12 +44,14 @@ local ah       = require('ahhistory');
 local tray     = require('tray');
 local skill    = require('skill');
 local fishing  = require('fishing');
+local helm     = require('helm');
+local zonemap  = require('zonemap');
 
 local defaults = T{
     visible    = false,
     minimized  = false,   -- shown as an icon at the bottom right instead
     x = 120, y = 120, w = 900, h = 560,
-    craft      = 1,       -- the tab: 1 woodworking .. 8 cooking, 9 fishing
+    craft      = 1,       -- the tab: 1 woodworking .. 8 cooking, 9 fishing, 10-13 harvesting, excavation, logging, mining
     desynth    = false,
     skillups   = false,   -- only recipes that can raise the craft
     sell       = 'AH',    -- what the profit assumes: 'AH' or 'NPC'
@@ -75,6 +80,13 @@ local defaults = T{
     fishsel    = 0,       -- the fish shown
     -- Today's catches (Japan's day, fishing.lua): days since 1970, how many, and how many of each.
     fishday    = T{ day = -1, count = 0, fish = T{ } },
+    -- HELM (helm.lua): the zone shown on each tab (its id), the gear the numbers assume ('none',
+    -- 'field', 'worker' or 'worn': what you have on), the list's sort, and the map's floor.
+    helmsel    = T{ 0, 0, 0, 0 },
+    helmgear   = 'worn',
+    helmsort   = 'zone',
+    helmdir    = 1,
+    helmfloor  = -1,      -- -1: the zone's first map
 };
 
 local ar = { settings = nil };
@@ -115,12 +127,23 @@ local function fix(s)
             end
         end
     end
-    if (type(s.craft) ~= 'number' or s.craft < 1 or s.craft > 9) then
+    if (type(s.craft) ~= 'number' or s.craft < 1 or s.craft > 13) then
         s.craft = 1;
     end
     local day = s.fishday;
     if (type(day) ~= 'table' or type(day.day) ~= 'number' or type(day.count) ~= 'number' or type(day.fish) ~= 'table') then
         s.fishday = T{ day = -1, count = 0, fish = T{ } };
+    end
+    if (type(s.helmsel) ~= 'table') then
+        s.helmsel = T{ 0, 0, 0, 0 };
+    end
+    for k = 1, 4 do
+        if (type(s.helmsel[k]) ~= 'number') then
+            s.helmsel[k] = 0;
+        end
+    end
+    if (s.helmgear ~= 'none' and s.helmgear ~= 'field' and s.helmgear ~= 'worker' and s.helmgear ~= 'worn') then
+        s.helmgear = 'worn';
     end
 end
 
@@ -128,12 +151,14 @@ local CRAFT_NAMES = {
     wood = 1, woodworking = 1, smith = 2, smithing = 2, gold = 3, goldsmithing = 3, cloth = 4, clothcraft = 4,
     leather = 5, leathercraft = 5, bone = 6, bonecraft = 6, alchemy = 7, alch = 7, cook = 8, cooking = 8,
     fish = 9, fishing = 9,
+    harvest = 10, harvesting = 10, excavate = 11, excavation = 11, dig = 11, log = 12, logging = 12, mine = 13, mining = 13,
 };
 
 local function help()
     msg('/allrecipes (or /ar)   show or hide the window, or bring it back from its icon');
     msg('/ar <craft>   open it on a craft: wood, smith, gold, cloth, leather, bone, alchemy, cook');
     msg('/ar fish   open the fishing atlas: every fish, its start and cap levels, and today\'s catches');
+    msg('/ar harvest|excavate|log|mine   open a HELM tab: each zone\'s drops, odds with and without gear, and its points on a map');
     msg('/ar min   minimize it to an icon at the bottom right; click the icon to bring it back');
     msg('/ar prices export [file]   save your prices as JSON (in config/addons/allrecipes)');
     msg('/ar prices import <file>   add prices from JSON: {"4098": 90} or [{"id": 4098, "price": 90}]');
@@ -183,6 +208,12 @@ ashita.events.register('load', 'allrecipes_load', function ()
     if (not fishing.load()) then
         err(('No fishing data (%s). Run tools/gen_fish.py.'):fmt(tostring(fishing.error)));
     end
+    if (not helm.load()) then
+        err(('No HELM data (%s). Run tools/gen_helm.py.'):fmt(tostring(helm.error)));
+    end
+    if (not zonemap.load()) then
+        err(('No map data (%s). Run tools/gen_maps.py.'):fmt(tostring(zonemap.error)));
+    end
     prices.load();
     if (prices.error ~= nil) then
         err(('Couldn\'t read your prices (%s).'):fmt(prices.error));
@@ -211,6 +242,8 @@ end);
 ashita.events.register('unload', 'allrecipes_unload', function ()
     tray.hide('allrecipes');
     settings.save();
+    zonemap.save_floors();
+    zonemap.unload();
     if (prices.dirty) then
         prices.save();
     end
@@ -334,6 +367,9 @@ ashita.events.register('d3d_present', 'allrecipes_present', function ()
     if (skill.dirty or fishing.dirty) then
         skill.dirty, fishing.dirty = false, false;
         save();
+    end
+    if (zonemap.dirty) then
+        zonemap.save_floors();
     end
     if (s.visible and s.minimized) then
         ui.draw_icon(s, save);

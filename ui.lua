@@ -16,6 +16,8 @@ local tray   = require('tray');
 local skill  = require('skill');
 local icons  = require('icons');
 local fishing = require('fishing');
+local helm   = require('helm');
+local zonemap = require('zonemap');
 
 local ui = {
     reset   = false,  -- put the window back where it starts next frame
@@ -291,26 +293,50 @@ end
 -- The craft chips, and your level in the craft (to the tenth where it's known): rank, cap,
 -- image support, gear; and the crystals you have.
 local function header(s, you)
-    for c, craft in ipairs(player.CRAFTS) do
-        if (c > 1) then
-            imgui.SameLine(0, 4);
+    -- The chips wrap onto another row when the window's too narrow for them all.
+    local row_left = imgui.GetCursorScreenPos();
+    local row_right = row_left + imgui.GetContentRegionAvail();
+    local first = true;
+    local function tab(id, text, on, key, gap)
+        if (not first) then
+            local x = imgui.GetItemRectMax();
+            if (x + gap + imgui.CalcTextSize(text) + 14 <= row_right) then
+                imgui.SameLine(0, gap);
+            end
         end
+        first = false;
+        return style.chip(id, text, on, key);
+    end
+    for c, craft in ipairs(player.CRAFTS) do
         local lo, hi = skill.range(s.skill, c, you);
         local level = lo == hi and skill.fmt(lo) or tostring(you.level[c]);
-        if (style.chip(('##ar_craft%d'):fmt(c), ('%s %s'):fmt(craft.short, level), s.craft == c)) then
+        if (tab(('##ar_craft%d'):fmt(c), ('%s %s'):fmt(craft.short, level), s.craft == c, nil, 4)) then
             s.craft, ui.scroll_top, ui.dirty = c, true, true;
         end
     end
     local f = fishing.SKILL;
     local flo, fhi = skill.range(s.skill, f, you);
-    if (chip('##ar_craft9', ('Fish %s'):fmt(flo == fhi and skill.fmt(flo) or tostring(you.level[f])), s.craft == f, 'hq', 12)) then
+    if (tab('##ar_craft9', ('Fish %s'):fmt(flo == fhi and skill.fmt(flo) or tostring(you.level[f])), s.craft == f, 'hq', 12)) then
         s.craft, ui.scroll_top, ui.dirty = f, true, true;
     end
     if (imgui.IsItemHovered()) then
         imgui.SetTooltip('The fishing atlas: every fish, the level to start it and where it stops\ngiving skill-ups, where it bites, and what you\'ve caught today.');
     end
+    -- HELM: harvesting, excavation, logging, mining.
+    for k, short in ipairs(helm.SHORT) do
+        local c = helm.FIRST + k - 1;
+        if (tab(('##ar_helm%d'):fmt(k), short, s.craft == c, 'good', k == 1 and 12 or 4)) then
+            s.craft, ui.scroll_top, ui.dirty = c, true, true;
+        end
+        if (imgui.IsItemHovered()) then
+            imgui.SetTooltip(('%s: each zone\'s drops and odds, with and without gear, and its points on the map.'):fmt(
+                helm.kinds ~= nil and helm.kinds[k].name or short));
+        end
+    end
     if (s.craft == f) then
         return ui.fish_header(s, you);
+    elseif (s.craft >= helm.FIRST) then
+        return ui.helm_header(s, you, s.craft - helm.FIRST + 1);
     end
 
     local c = s.craft;
@@ -1195,6 +1221,438 @@ local function fish_body(s, you)
     fish_legend();
 end
 
+--[[
+* HELM (helm.lua): a tab each for harvesting, excavation, logging and mining. The zones with their
+* odds; the one picked with its drops a try and a tool, with and without gear, and its points
+* on the game's map of the zone (zonemap.lua).
+--]]
+local GEAR_CHOICES = { { 'none', 'no gear' }, { 'field', 'Field set' }, { 'worker', 'Worker set' }, { 'worn', 'what you wear' } };
+
+local function zone_name(id)
+    local n = AshitaCore:GetResourceManager():GetString('zones.names', id);
+    return (n ~= nil and n ~= '') and n or ('Zone %d'):fmt(id);
+end
+
+-- The gear points the numbers assume (s.helmgear), and what to call them.
+local function gear_points(s, kind)
+    local sets = helm.sets(kind);
+    if (s.helmgear == 'field') then
+        return sets.field[1], sets.field[2], 'Field set';
+    elseif (s.helmgear == 'worker') then
+        return sets.worker[1], sets.worker[2], 'Worker set';
+    elseif (s.helmgear == 'worn') then
+        local nq, hq = helm.worn(kind);
+        return nq, hq, 'what you wear';
+    end
+    return 0, 0, 'no gear';
+end
+
+local function count_of(bag, id)
+    return bag[id] or 0;
+end
+
+function ui.helm_header(s, you, k)
+    imgui.Spacing();
+    if (helm.kinds == nil) then
+        return;
+    end
+    local kind = helm.kinds[k];
+    style.big(kind.name, style.col('accent'), 30);
+    imgui.SameLine(0, 12);
+    imgui.BeginGroup();
+    local bag = player.inventory(os.clock());
+    local tools = count_of(bag, kind.tool);
+    imgui.TextColored(style.f(tools > 0 and 'text' or 'warn'), ('%d %s%s in your bags'):fmt(tools, model.name(kind.tool),
+        tools == 1 and '' or 's'));
+    if (#kind.gear == 0) then
+        dim('No gear helps it: the tool breaks as often whatever you wear.');
+    else
+        local nq, hq, pieces = helm.worn(kind);
+        if (#pieces == 0) then
+            dim(('No %s gear on: Field and Worker gear make tools break less.'):fmt(kind.name:lower()));
+        else
+            local names = { };
+            for _, id in ipairs(pieces) do
+                names[#names + 1] = model.name(id);
+            end
+            imgui.TextColored(style.f('good'), ('Wearing %s: tools break x%.2f as often'):fmt(table.concat(names, ', '),
+                helm.NQ ^ nq * helm.HQ ^ hq));
+        end
+    end
+    imgui.EndGroup();
+end
+
+local function helm_toolbar(s, kind)
+    local first = true;
+    if (#kind.gear > 0) then
+        local sets = helm.sets(kind);
+        local wnq, whq = helm.worn(kind);
+        local mult = { none = 1, field = helm.NQ ^ sets.field[1], worker = helm.HQ ^ sets.worker[2], worn = helm.NQ ^ wnq * helm.HQ ^ whq };
+        for _, g in ipairs(GEAR_CHOICES) do
+            local text = g[1] == 'none' and g[2] or ('%s x%.2f'):fmt(g[2], mult[g[1]]);
+            local on = s.helmgear == g[1];
+            if ((first and style.chip('##ar_hg_' .. g[1], text, on)) or (not first and chip('##ar_hg_' .. g[1], text, on))) then
+                s.helmgear, ui.dirty = g[1], true;
+            end
+            first = false;
+            if (imgui.IsItemHovered()) then
+                local tips = {
+                    none = 'The numbers with no gear on.',
+                    field = 'With the three Field pieces that help it (each makes tools break x0.893 as often).',
+                    worker = 'With the three Worker pieces that help it (each makes tools break x0.843 as often).',
+                    worn = 'With the gear you have on now.',
+                };
+                imgui.SetTooltip(tips[g[1]] .. '\nGear only changes how often the tool breaks, not what you find.');
+            end
+        end
+    else
+        dim('no gear for excavation');
+        first = false;
+    end
+    imgui.SameLine(0, 16);
+    imgui.PushItemWidth(170);
+    ui.search[1] = ui.search[1] or '';
+    if (imgui.InputTextWithHint('##ar_hsearch', 'search items or zones', ui.search, 48)) then
+        s.search = ui.search[1];
+    end
+    imgui.PopItemWidth();
+    if (chip('##ar_cfg', 'settings', s.cfg, nil, 8)) then s.cfg, ui.dirty = not s.cfg, true; end
+end
+
+local function helm_list(s, kind, rows, width, height, nq, hq)
+    local pts_r = width - 24;
+    local brk_r = pts_r - 44;
+    local ob_r = brk_r - 58;
+    local find_r = ob_r - 58;
+    local searching = (s.search or '') ~= '';
+    local function head(label, key, x, right, first_, tip)
+        local on = (s.helmsort or 'zone') == key;
+        local shown = on and (label .. ((s.helmdir or 1) > 0 and ' ^' or ' v')) or label;
+        local at = right and x - imgui.CalcTextSize(shown) or x;
+        if (first_) then
+            imgui.SetCursorPosX(at);
+        else
+            imgui.SameLine(at);
+        end
+        imgui.TextColored(style.f(on and 'accent' or 'dim'), shown);
+        if (tip ~= nil and imgui.IsItemHovered()) then
+            imgui.SetTooltip(tip);
+        end
+        if (imgui.IsItemClicked(ImGuiMouseButton_Left)) then
+            if (on) then
+                s.helmdir = -(s.helmdir or 1);
+            else
+                s.helmsort, s.helmdir = key, key == 'zone' and 1 or -1;
+            end
+            ui.dirty = true;
+        end
+    end
+    head('Zone', 'zone', 8, false, true);
+    if (searching) then
+        head('Item', 'find', find_r, true, false, 'The chance a try of what you searched for.');
+    end
+    head('Finds', 'obtain', ob_r, true, false, 'How often a try finds something.');
+    head('Breaks', 'brk', brk_r, true, false, 'How often a try breaks the tool, with the gear picked above.');
+    head('Pts', 'points', pts_r, true, false, 'How many spots its points move between.');
+
+    imgui.BeginChild('ar_hlist', { width, height }, ImGuiChildFlags_Borders);
+    if (ui.scroll_top) then
+        imgui.SetScrollY(0);
+        ui.scroll_top = false;
+    end
+    if (#rows == 0) then
+        dim(searching and 'No zone gives that.' or 'No zones.');
+    end
+    local dl = imgui.GetWindowDrawList();
+    for _, row in ipairs(rows) do
+        local z = row.z;
+        local x0, y0 = imgui.GetCursorScreenPos();
+        if (imgui.Selectable(('##arh%d'):fmt(z.id), ui.hsel == z.id)) then
+            ui.hpick = z.id;
+        end
+        local function text(x, col, t)
+            dl:AddText({ x0 + x, y0 }, col, t);
+        end
+        local function rtext(x, col, t)
+            text(x - imgui.CalcTextSize(t), col, t);
+        end
+        local name = fit(row.name, (searching and find_r - 60 or ob_r - 60) - 8);
+        text(8, style.col('text'), name);
+        local tx = 8 + imgui.CalcTextSize(name) + 8;
+        local function tag(t, key)
+            local tw, th = imgui.CalcTextSize(t);
+            dl:AddRectFilled({ x0 + tx - 3, y0 }, { x0 + tx + tw + 3, y0 + th }, style.col(key, 40), th / 2, ImDrawFlags_RoundCornersAll);
+            text(tx, style.col(key, 220), t);
+            tx = tx + tw + 9;
+        end
+        if (z.tag) then tag(model.EXPANSION_SHORT[z.tag] or z.tag, 'dim'); end
+        if (z.level > 0) then tag(('Lv%d'):fmt(z.level), 'warn'); end
+        if (z.weather) then tag(z.weather, 'hq'); end
+        if (searching) then
+            rtext(find_r, style.col('good'), row.find ~= nil and model.pct(row.find) or '-');
+        end
+        rtext(ob_r, style.col('text'), model.pct(z.obtain));
+        rtext(brk_r, style.col('bad'), model.pct(helm.break_with(z, nq, hq)));
+        rtext(pts_r, style.col('dim'), tostring(#z.points));
+    end
+    imgui.EndChild();
+end
+
+-- A number of things a tool: 12.3, 8.0, 140.
+local function per(v)
+    return v >= 100 and ('%d'):fmt(math.floor(v + 0.5)) or ('%.1f'):fmt(v);
+end
+
+-- The map of a zone with its points (and you, when you're there).
+local function helm_map(s, z, width)
+    local maps = zonemap.of(z.id);
+    if (#maps == 0) then
+        dim('The game has no map of this zone.');
+        return;
+    end
+    local yx, yz, here_zone = zonemap.you();
+    local here = here_zone == z.id;
+    -- Which floor each point is on: the game's answer, kept from a visit.
+    local floors, unknown = { }, 0;
+    for i, p in ipairs(z.points) do
+        floors[i] = #maps > 1 and zonemap.floor_of(z.id, p, here) or maps[1].floor;
+        if (floors[i] == nil) then
+            unknown = unknown + 1;
+        end
+    end
+    local pick = nil;
+    for _, m in ipairs(maps) do
+        if (m.floor == s.helmfloor) then
+            pick = m;
+        end
+    end
+    if (pick == nil) then
+        -- The floor with the most points, else the first.
+        local best, n = maps[1], -1;
+        for _, m in ipairs(maps) do
+            local c = 0;
+            for i = 1, #z.points do
+                if (floors[i] == m.floor) then c = c + 1; end
+            end
+            if (c > n) then best, n = m, c; end
+        end
+        pick = best;
+    end
+    if (#maps > 1) then
+        dim('Floor');
+        for i, m in ipairs(maps) do
+            local c = 0;
+            for j = 1, #z.points do
+                if (floors[j] == m.floor) then c = c + 1; end
+            end
+            if (chip(('##ar_hf%d'):fmt(m.floor), c > 0 and ('%d (%d)'):fmt(i, c) or tostring(i), m == pick, nil, i == 1 and 6 or 4)) then
+                s.helmfloor, ui.dirty = m.floor, true;
+            end
+        end
+    end
+    local tex = zonemap.texture(pick);
+    local size = math.max(160, math.min(512, width));
+    local x0, y0 = imgui.GetCursorScreenPos();
+    if (tex == nil) then
+        dim(('No map picture: %s.'):fmt(zonemap.why or '?'));
+        return;
+    end
+    local dl = imgui.GetWindowDrawList();
+    dl:AddImage(tex, { x0, y0 }, { x0 + size, y0 + size });
+    imgui.Dummy({ size, size });
+    local k = size / 512;
+    local mx, my = imgui.GetMousePos();
+    local tip = nil;
+    for i, p in ipairs(z.points) do
+        local f = floors[i];
+        if (f == pick.floor or f == nil) then
+            local px, py = zonemap.to_map(pick, p[1], p[3]);
+            local cx, cy = x0 + px * k, y0 + py * k;
+            if (f == nil) then
+                dl:AddCircle({ cx, cy }, 4, style.col('dim', 230), 12, 1.5);
+            else
+                dl:AddCircleFilled({ cx, cy }, 4.5, style.col('shadow', 160), 12);
+                dl:AddCircleFilled({ cx, cy }, 3.5, style.col('bad', 255), 12);
+            end
+            if ((mx - cx) ^ 2 + (my - cy) ^ 2 <= 36) then
+                tip = ('Point spot %d: (%.0f, %.0f), height %.0f%s'):fmt(i, p[1], p[3], p[2], f == nil and '\nIts floor isn\'t known yet.' or '');
+            end
+        end
+    end
+    if (here and yx ~= nil) then
+        local px, py = zonemap.to_map(pick, yx, yz);
+        local cx, cy = x0 + px * k, y0 + py * k;
+        dl:AddCircleFilled({ cx, cy }, 5.5, style.col('shadow', 180), 12);
+        dl:AddCircleFilled({ cx, cy }, 4, style.col('accent', 255), 12);
+        if ((mx - cx) ^ 2 + (my - cy) ^ 2 <= 36) then
+            tip = 'You';
+        end
+    end
+    if (tip ~= nil) then
+        imgui.SetTooltip(tip);
+    end
+    dim(('The %d spots its points move between%s. A point shows at one at a time.'):fmt(#z.points, here and '; the gold dot is you' or ''));
+    if (unknown > 0) then
+        imgui.PushTextWrapPos(0);
+        dim(('%d of them are on a floor not known yet (hollow): the game tells which floor a spot is on only in its zone, so they sort themselves once you\'re there.'):fmt(unknown));
+        imgui.PopTextWrapPos();
+    end
+end
+
+local function helm_detail(s, kind, z, nq, hq, label)
+    style.big(zone_name(z.id), style.col('text'), 22);
+    local tags = { };
+    if (z.tag) then tags[#tags + 1] = { (model.EXPANSION_SHORT[z.tag] or z.tag) .. ' zone', 'dim' }; end
+    if (z.level > 0) then tags[#tags + 1] = { ('nothing under level %d'):fmt(z.level), 'warn' }; end
+    if (z.weather) then tags[#tags + 1] = { ('points only in %s'):fmt(z.weather), 'hq' }; end
+    for i, t in ipairs(tags) do
+        if (i > 1) then imgui.SameLine(0, 6); end
+        style.tag(t[1], t[2]);
+    end
+
+    -- The odds, with and without gear.
+    local tool = model.name(kind.tool);
+    local b = helm.break_with(z, nq, hq);
+    imgui.Spacing();
+    style.tag(('finds %s'):fmt(model.pct(z.obtain)), 'good');
+    imgui.SameLine(0, 6);
+    style.tag(('breaks %s'):fmt(model.pct(b)), 'bad');
+    imgui.SameLine(0, 6);
+    style.tag(('%s finds a %s'):fmt(per(z.obtain / math.max(b, 1e-6)), tool:lower()), 'text');
+    if (imgui.IsItemHovered()) then
+        imgui.SetTooltip(('Finds on average before the %s breaks, with %s.'):fmt(tool:lower(), label));
+    end
+    if (#kind.gear > 0) then
+        local sets = helm.sets(kind);
+        local wnq, whq = helm.worn(kind);
+        local cols = {
+            { 'no gear', 0, 0 }, { 'Field set', sets.field[1], sets.field[2] }, { 'Worker set', sets.worker[1], sets.worker[2] }, { 'what you wear', wnq, whq },
+        };
+        local w = imgui.GetContentRegionAvail();
+        local cx = { w - 300, w - 225, w - 150, w - 75 };
+        imgui.Spacing();
+        dim('');
+        for i, c in ipairs(cols) do
+            right_text(cx[i] + 70, s.helmgear == GEAR_CHOICES[i][1] and 'accent' or 'dim', c[1]);
+        end
+        local function line(name, f, key)
+            dim(name);
+            for i, c in ipairs(cols) do
+                right_text(cx[i] + 70, key, f(helm.break_with(z, c[2], c[3])));
+            end
+        end
+        line('tool breaks', function (v) return model.pct(v); end, 'bad');
+        line('tries a ' .. tool:lower(), function (v) return per(1 / math.max(v, 1e-6)); end, 'text');
+        line('finds a ' .. tool:lower(), function (v) return per(z.obtain / math.max(v, 1e-6)); end, 'good');
+    end
+
+    -- The drops.
+    imgui.SeparatorText('What it gives');
+    local w = imgui.GetContentRegionAvail();
+    local try_r, tool0_r, tool_r = w - 150, w - 75, w;
+    dim('');
+    right_text(try_r, 'dim', 'a try');
+    right_text(tool0_r, 'dim', 'a tool, no gear');
+    if (#kind.gear > 0 and (nq > 0 or hq > 0)) then
+        right_text(tool_r, 'accent', 'with gear');
+    end
+    local b0 = z.brk;
+    local worth, priced = 0, 0;
+    for _, d in ipairs(z.drops) do
+        local c = helm.chance(z, d);
+        local name = model.name(d.id);
+        if (d.id == helm.RED_ROCK) then
+            name = 'Coloured rock (the day\'s)';
+        end
+        link(d.id, name);
+        if (d.cap > 0) then
+            imgui.SameLine(0, 6);
+            style.tag(('cap %d a day'):fmt(d.cap), 'warn');
+        end
+        if (d.pool) then
+            imgui.SameLine(0, 6);
+            style.tag('runs out', 'warn');
+            if (imgui.IsItemHovered()) then
+                imgui.SetTooltip(('Each one of these (shared with the others marked so) makes the next rarer,\nand after %d none come until you zone.'):fmt(z.depletion));
+            end
+        end
+        right_text(try_r, 'good', model.pct(c));
+        right_text(tool0_r, 'text', per(c / math.max(b0, 1e-6)));
+        if (#kind.gear > 0 and (nq > 0 or hq > 0)) then
+            right_text(tool_r, 'accent', per(c / math.max(b, 1e-6)));
+        end
+        local v = prices.view[d.id];
+        if (v ~= nil) then
+            worth, priced = worth + c * v, priced + 1;
+        end
+    end
+    if (priced > 0) then
+        dim(('Worth about %s gil a try, %s a %s with %s (%d of %d drops priced).'):fmt(model.gil(worth), model.gil(worth / math.max(b, 1e-6)),
+            tool:lower(), label, priced, #z.drops));
+    end
+    imgui.PushTextWrapPos(0);
+    for _, d in ipairs(z.drops) do
+        if (d.id == helm.RED_ROCK) then
+            dim('The coloured rock is the day\'s: red on Firesday, translucent on Iceday, and so on.');
+            break;
+        end
+    end
+    for _, d in ipairs(z.drops) do
+        if (d.cap > 0) then
+            dim('A capped drop gets rarer with each one that day, and stops at the cap; it starts over the first time you zone in after midnight in Japan.');
+            break;
+        end
+    end
+    if (z.level > 0) then
+        dim(('Under level %d (your main job) every try finds nothing, and the tool can still break.'):fmt(z.level));
+    end
+    dim(('A point moves after %d%% of finds (it\'s gone for %d seconds). One that moves away from under you and comes back to the same spot breaks tools %.1f times as often for you there.'):fmt(
+        kind.relocate, kind.respawn, kind.camp));
+    imgui.PopTextWrapPos();
+
+    imgui.SeparatorText('Where the points are');
+    helm_map(s, z, imgui.GetContentRegionAvail());
+end
+
+local function helm_body(s, you, k)
+    if (helm.error ~= nil or helm.kinds == nil) then
+        imgui.TextColored(style.f('bad'), ('No HELM data (%s). Run tools/gen_helm.py.'):fmt(tostring(helm.error)));
+        return;
+    end
+    local kind = helm.kinds[k];
+    helm_toolbar(s, kind);
+    imgui.Spacing();
+    local nq, hq, label = gear_points(s, kind);
+    local rows = helm.rows(s, k, model.name, zone_name);
+    local sel = nil;
+    for _, row in ipairs(rows) do
+        if (row.z.id == s.helmsel[k]) then
+            sel = row.z;
+        end
+    end
+    if (sel == nil and rows[1] ~= nil) then
+        sel = rows[1].z;
+        s.helmsel[k] = sel.id;
+    end
+    ui.hsel, ui.hpick = sel ~= nil and sel.id or nil, nil;
+    local aw, ah = imgui.GetContentRegionAvail();
+    local head = imgui.GetTextLineHeightWithSpacing();
+    local lw = math.min(400, math.floor(aw * 0.42));
+    local bodyh = math.max(80, ah - head - 4);
+    imgui.BeginGroup();
+    helm_list(s, kind, rows, lw, bodyh, nq, hq);
+    imgui.EndGroup();
+    if (ui.hpick ~= nil and ui.hpick ~= s.helmsel[k]) then
+        s.helmsel[k], s.helmfloor, ui.dirty = ui.hpick, -1, true;
+    end
+    imgui.SameLine();
+    imgui.BeginChild('ar_hdetail', { 0, bodyh + head }, ImGuiChildFlags_Borders);
+    if (sel ~= nil) then
+        helm_detail(s, kind, sel, nq, hq, label);
+    end
+    imgui.EndChild();
+end
+
 -- The settings window: look, expansions, what the list shows, skill bonuses, prices.
 local function settings_window(s)
     local open = { true };
@@ -1309,7 +1767,9 @@ function ui.draw(s, you, save)
     style.push_window();
     style.push_controls();
     local fish = s.craft == fishing.SKILL;
-    local title = ('allrecipes - %s%s###allrecipes'):fmt(player.skill_info(s.craft).name, (s.desynth and not fish) and ' desynthesis' or '');
+    local gather = s.craft >= helm.FIRST;
+    local tab_name = gather and (helm.kinds ~= nil and helm.kinds[s.craft - helm.FIRST + 1].name or 'HELM') or player.skill_info(s.craft).name;
+    local title = ('allrecipes - %s%s###allrecipes'):fmt(tab_name, (s.desynth and not fish and not gather) and ' desynthesis' or '');
     -- No close button: a - in its place minimizes it to the icon (/ar hides it).
     if (imgui.Begin(title, nil, bit.bor(ImGuiWindowFlags_NoSavedSettings, ImGuiWindowFlags_NoCollapse))) then
         local wx, wy = imgui.GetWindowPos();
@@ -1320,11 +1780,15 @@ function ui.draw(s, you, save)
         -- A chip in the header can switch between a craft and fishing; the rest of the frame
         -- is left out then, and drawn for the new tab next frame.
         local craft = s.craft;
-        if (fish) then
+        if (fish or gather) then
             header(s, you);
             imgui.Spacing();
             if (s.craft == craft) then
-                fish_body(s, you);
+                if (fish) then
+                    fish_body(s, you);
+                else
+                    helm_body(s, you, craft - helm.FIRST + 1);
+                end
             end
         elseif (model.error ~= nil) then
             imgui.TextColored(style.f('bad'), ('No recipe data (%s). Run tools/gen_recipes.py.'):fmt(model.error));

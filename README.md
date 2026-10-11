@@ -13,8 +13,9 @@ Every era synthesis and desynthesis recipe on PhoenixXI, by craft, for Ashita v4
 - Your craft levels show to the tenth (22.4), worked out from your skill-up messages.
 - The crystals in your inventory are counted at the top of the window.
 - The **Fish** tab is a fishing atlas: every fish with the level to start it and the level it caps at, your skill-up chance, the bait it takes, where it bites, and how many fish you've caught today. See [Fishing atlas](#fishing-atlas).
+- The **Harvest**, **Excavate**, **Log** and **Mine** tabs cover HELM: every zone's drops and how often you get each, how often the tool breaks with and without Field or Worker gear, and its gathering points on the game's own map of the zone. See [HELM](#helm).
 
-Nothing is ever sent to the server and nothing is asked of it: allrecipes only reads client memory and the packets the game receives anyway. Phoenix only allows tools on its [approved addon list](https://phoenix-xi.com/approved-addons), so check it's there before using it on the server.
+Nothing is ever sent to the server and nothing is asked of it: allrecipes only reads client memory, the game's files and the packets the game receives anyway. (To sort HELM points onto a zone's floors it also asks the game which floor a spot is on, which happens inside your client.) Phoenix only allows tools on its [approved addon list](https://phoenix-xi.com/approved-addons), so check it's there before using it on the server.
 
 ## Installation
 - Copy the `allrecipes` folder into your Ashita v4 `addons` directory. From a release zip, extract it into the Ashita folder itself (the one with `addons` and `config` in it, `Game` on HorizonXI), not into `config`.
@@ -26,6 +27,7 @@ Nothing is ever sent to the server and nothing is asked of it: allrecipes only r
 | `/allrecipes` or `/ar` | show or hide the window, or bring it back from its icon |
 | `/ar <craft>` | open it on a craft: `wood`, `smith`, `gold`, `cloth`, `leather`, `bone`, `alchemy`, `cook` |
 | `/ar fish` | open the fishing atlas |
+| `/ar harvest`, `excavate`, `log`, `mine` | open a HELM tab |
 | `/ar min` | minimize it to an icon at the bottom right |
 | `/ar prices export [file]` | save your prices as JSON (`prices.json` in `config/addons/allrecipes`) |
 | `/ar prices import <file>` | add prices from JSON |
@@ -74,6 +76,21 @@ The chance shown is for fishing outside a town on an ordinary moon. Skill-ups co
 The fish come from Phoenix's fishing tables. To update them:
 
     python tools/gen_fish.py --phoenix C:\code\Phoenix
+
+## HELM
+One tab each for harvesting, excavation, logging and mining. The zones come from Phoenix's HELM table, which has measured rates and retail-captured point positions (`scripts/globals/hobbies/helm`). Drops that Phoenix's era module takes out (added in WotG or later) are left out here too.
+
+The list shows each zone's chance a try of finding something, of breaking the tool, and how many spots its points move between. Type an item in the search box to list only the zones that give it, with its chance a try.
+
+Pick a zone to see:
+- **The odds:** how often a try finds something and how often the tool breaks. The table under them shows the break chance, tries a tool and finds a tool with no gear, the Field set, the Worker set and what you have on. Gear only changes how often the tool breaks: each Field piece (NQ) makes it break x0.893 as often and each Worker piece (HQ) x0.843. Three pieces of each set help each of harvesting, logging and mining, and nothing helps excavation. The chips above the list pick which gear the list and the drop table assume.
+- **What it gives:** each drop's chance a try, and how many you get on average from one tool with no gear and with the gear picked. With prices typed in or AH history, it also works out what a try and a tool are worth. Drops with a daily cap or that run out until you zone are marked, and the coloured rock is the day's.
+- **Where the points are:** the game's own map of the zone, read from your game files, with the spots the points move between. A point stands at one spot at a time and moves after some finds. When you're in the zone, a gold dot shows where you are. In a zone with several floors, the game can only say which floor a spot is on while you're in that zone; once you've been there, the spots sort onto their floors and stay sorted (kept in `config/addons/allrecipes/floors.lua`). Until then they show hollow on every floor.
+
+The data comes from Phoenix and the game:
+
+    python tools/gen_helm.py --phoenix C:\code\Phoenix
+    python tools/gen_maps.py --dump C:\Games\PhoenixXI\FFXiMain_04490000.bin
 
 ## Your skill to the tenth
 The server keeps craft skill in tenths but only tells your client whole levels. Every skill-up does come with a message, though: "skill rises 0.3 points", and "reaches level 23" when that crosses a level. allrecipes reads those (only reads; they're the packets the game receives anyway) and keeps your skill as a range that each skill-up narrows:
