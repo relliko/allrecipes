@@ -2,7 +2,7 @@
 * allrecipes - ui
 * The window, in scouter's look (style.lua): craft chips, your level (to the tenth where it's
 * known), the crystals you have, the recipe list and the chosen recipe's materials, odds and
-* prices; and a settings window.
+* prices; the fishing atlas on the Fish tab; and a settings window.
 --]]
 
 local imgui  = require('imgui');
@@ -15,6 +15,7 @@ local ah     = require('ahhistory');
 local tray   = require('tray');
 local skill  = require('skill');
 local icons  = require('icons');
+local fishing = require('fishing');
 
 local ui = {
     reset   = false,  -- put the window back where it starts next frame
@@ -167,7 +168,7 @@ end
 
 -- What the tenths of a craft's skill show as, and say when hovered.
 local function tenths(c, lo, hi)
-    local name = player.CRAFTS[c].name;
+    local name = player.skill_info(c).name;
     local how = 'The game only tells your client whole levels; allrecipes works out the tenths from\nyour skill-up messages ("rises 0.3 points", "reaches level 23").';
     local known = skill.known(lo, hi);
     if (known == 'exact') then
@@ -299,6 +300,17 @@ local function header(s, you)
         if (style.chip(('##ar_craft%d'):fmt(c), ('%s %s'):fmt(craft.short, level), s.craft == c)) then
             s.craft, ui.scroll_top, ui.dirty = c, true, true;
         end
+    end
+    local f = fishing.SKILL;
+    local flo, fhi = skill.range(s.skill, f, you);
+    if (chip('##ar_craft9', ('Fish %s'):fmt(flo == fhi and skill.fmt(flo) or tostring(you.level[f])), s.craft == f, 'hq', 12)) then
+        s.craft, ui.scroll_top, ui.dirty = f, true, true;
+    end
+    if (imgui.IsItemHovered()) then
+        imgui.SetTooltip('The fishing atlas: every fish, the level to start it and where it stops\ngiving skill-ups, where it bites, and what you\'ve caught today.');
+    end
+    if (s.craft == f) then
+        return ui.fish_header(s, you);
     end
 
     local c = s.craft;
@@ -764,6 +776,353 @@ local function legend(s)
     imgui.TextColored(style.f('dim', 170), 'ctrl+click an item: ffxiah.com');
 end
 
+--[[
+* The fishing atlas (fishing.lua): your fishing level and today's catches, the fish with the
+* level to start each and the level it stops giving skill-ups, and the one picked: your odds on
+* it, the bait it takes and where it bites.
+--]]
+local FISH_LEGEND = { { 'safe', 'at or under you' }, { 'good', 'skill-ups, 1-20 over' }, { 'risky', '21-35 over' },
+                      { 'hard', '36-50 over' }, { 'zero', 'over 50' }, { 'cant', 'item' } };
+local POWER = { 'bites', 'good', 'best' };
+
+local function hm(secs)
+    return ('%dh %02dm'):fmt(math.floor(secs / 3600), math.floor(secs % 3600 / 60));
+end
+
+function ui.fish_header(s, you)
+    local f = fishing.SKILL;
+    local level, rank = you.level[f], you.rank[f];
+    local cap = math.min((rank + 1) * 10, fishing.CAP);
+    local lo, hi = skill.range(s.skill, f, you);
+    imgui.Spacing();
+    local _, top = imgui.GetCursorScreenPos();
+    local right = imgui.GetCursorScreenPos() + imgui.GetContentRegionAvail();
+    style.big(tostring(level), style.col('accent'), 30);
+    imgui.SameLine(0, 1);
+    local frac, key, tip = tenths(f, lo, hi);
+    style.big(frac, style.col(key), 18, 30);
+    if (imgui.IsItemHovered()) then
+        imgui.SetTooltip(tip);
+    end
+    imgui.SameLine(0, 10);
+    imgui.BeginGroup();
+    imgui.TextColored(style.f('text'), 'Fishing');
+    imgui.SameLine();
+    dim(('%s, cap %d'):fmt(player.RANKS[rank] or '?', cap));
+    local capped = you.capped[f] or level >= cap;
+    style.bar(160, capped and 1 or (lo / 10 - rank * 10) / 10, capped and 'hq' or 'accent');
+    local over = 0;
+    for _, row in ipairs(fishing.list or { }) do
+        if (not row.item and row.lv > level and row.lv - level <= fishing.REACH) then
+            over = over + 1;
+        end
+    end
+    dim(('%d fish give you skill-ups'):fmt(over));
+    if (capped) then
+        imgui.SameLine(0, 6);
+        style.tag('capped', 'hq');
+    end
+    imgui.EndGroup();
+    local group_right = imgui.GetItemRectMax();
+
+    -- Today's catches, at the top right (under the level in a narrow window).
+    local day = s.fishday;
+    fishing.roll(day);
+    local back_x, back_y = imgui.GetCursorScreenPos();
+    local count = tostring(day.count);
+    local reset = ('resets in %s'):fmt(hm(fishing.until_reset()));
+    local why = ('Your catches since midnight in Japan (15:00 UTC), when the game\'s\ndaily limits start over too. Counted from your "caught" lines while\nthe addon is loaded; fish you let go or couldn\'t carry don\'t count.\nNext reset in %s.'):fmt(hm(fishing.until_reset()));
+    local cw = imgui.CalcTextSize(count) * 30 / math.max(imgui.GetFontSize(), 1);
+    local lw = math.max(imgui.CalcTextSize('caught today'), imgui.CalcTextSize(reset));
+    local x = right - cw - 8 - lw;
+    if (x >= group_right + 16) then
+        imgui.SetCursorScreenPos({ x, top });
+        imgui.BeginGroup();
+        style.big(count, style.col(day.count > 0 and 'good' or 'dim'), 30);
+        imgui.SameLine(0, 8);
+        imgui.BeginGroup();
+        imgui.TextColored(style.f('text'), 'caught today');
+        dim(reset);
+        imgui.EndGroup();
+        imgui.EndGroup();
+        if (imgui.IsItemHovered()) then
+            imgui.SetTooltip(why);
+        end
+        imgui.SetCursorScreenPos({ back_x, back_y });
+    else
+        dim(('%d caught today, %s'):fmt(day.count, reset));
+        if (imgui.IsItemHovered()) then
+            imgui.SetTooltip(why);
+        end
+    end
+end
+
+local function fish_toolbar(s)
+    if (style.chip('##ar_fall', 'all fish', not s.fishups)) then s.fishups, ui.dirty = false, true; end
+    if (chip('##ar_fups', 'skill-ups', s.fishups, 'good')) then s.fishups, ui.dirty = true, true; end
+    if (imgui.IsItemHovered()) then
+        imgui.SetTooltip(('Only fish that give you skill-ups now: over your level, by no more than %d.'):fmt(fishing.REACH));
+    end
+    if (chip('##ar_fitems', 'items', s.fishitems, nil, 16)) then s.fishitems, ui.dirty = not s.fishitems, true; end
+    if (imgui.IsItemHovered()) then
+        imgui.SetTooltip('List what isn\'t a fish too (logs, buckets, kelp...). They never give skill-ups.');
+    end
+    imgui.SameLine(0, 16);
+    imgui.PushItemWidth(150);
+    ui.search[1] = ui.search[1] or '';
+    if (imgui.InputTextWithHint('##ar_fsearch', 'search fish', ui.search, 48)) then
+        s.search = ui.search[1];
+    end
+    imgui.PopItemWidth();
+    if (chip('##ar_cfg', 'settings', s.cfg, nil, 8)) then s.cfg, ui.dirty = not s.cfg, true; end
+end
+
+local function fish_list(s, rows, width, height)
+    local today_r = width - 24;
+    local up_r = today_r - 56;
+    local tag_x = up_r - 50 - 84;
+    local function head(label, key, x, right, first, tip)
+        local on = s.fishsort == key;
+        local shown = on and (label .. (s.fishdir > 0 and ' ^' or ' v')) or label;
+        local at = right and x - imgui.CalcTextSize(shown) or x;
+        if (first) then
+            imgui.SetCursorPosX(at);
+        else
+            imgui.SameLine(at);
+        end
+        imgui.TextColored(style.f(on and 'accent' or 'dim'), shown);
+        if (tip ~= nil and imgui.IsItemHovered()) then
+            imgui.SetTooltip(tip);
+        end
+        if (imgui.IsItemClicked(ImGuiMouseButton_Left)) then
+            if (on) then
+                s.fishdir = -s.fishdir;
+            else
+                s.fishsort, s.fishdir = key, (key == 'up' or key == 'today') and -1 or 1;
+            end
+            ui.dirty = true;
+        end
+    end
+    head('Start', 'start', 8, false, true, ('The level to start fishing it: %d under its cap. From there skill-ups\ncome more often and fewer than 1 in 10 get away for lack of skill.'):fmt(fishing.START));
+    head('Cap', 'cap', 52, false, false, 'Its skill level: no more skill-ups from it once you reach it.');
+    head('Fish', 'name', 88);
+    head('Up', 'up', up_r, true, false, 'Your skill-up chance a catch, outside a town on an ordinary moon.');
+    head('Today', 'today', today_r, true, false, 'How many you\'ve caught today (Japan\'s day).');
+
+    imgui.BeginChild('ar_flist', { width, height }, ImGuiChildFlags_Borders);
+    if (ui.scroll_top) then
+        imgui.SetScrollY(0);
+        ui.scroll_top = false;
+    end
+    if (#rows == 0) then
+        dim(s.fishups and 'No fish gives you a skill-up.' or 'No fish match.');
+    end
+    local rowh = imgui.GetTextLineHeightWithSpacing();
+    local top = imgui.GetCursorPosY();
+    local first = math.max(0, math.floor((imgui.GetScrollY() - top) / rowh));
+    local last = math.min(#rows, first + math.ceil(imgui.GetWindowHeight() / rowh) + 1);
+    local dl = imgui.GetWindowDrawList();
+    for i = first + 1, last do
+        local row = rows[i];
+        local f = row.f;
+        imgui.SetCursorPosY(top + (i - 1) * rowh);
+        local x0, y0 = imgui.GetCursorScreenPos();
+        if (imgui.Selectable(('##arf%d'):fmt(f.id), s.fishsel == f.id)) then
+            if (imgui.GetIO().KeyCtrl and f.id < 65535) then
+                ui.open_item(f.id);
+            else
+                s.fishsel, ui.dirty = f.id, true;
+            end
+        end
+        local function text(x, col, t)
+            dl:AddText({ x0 + x, y0 }, col, t);
+        end
+        local function rtext(x, col, t)
+            text(x - imgui.CalcTextSize(t), col, t);
+        end
+        text(8, style.col('dim'), f.item and '-' or tostring(f.start));
+        text(52, style.col('text'), tostring(f.lv));
+        text(88, style.col(ui.band_key(row.band)), fit(f.name, tag_x - 94));
+        local tx = tag_x;
+        local function tag(t, key)
+            local tw, th = imgui.CalcTextSize(t);
+            dl:AddRectFilled({ x0 + tx - 3, y0 }, { x0 + tx + tw + 3, y0 + th }, style.col(key, 40), th / 2, ImDrawFlags_RoundCornersAll);
+            text(tx, style.col(key, 220), t);
+            tx = tx + tw + 9;
+        end
+        if (f.large) then tag('L', 'hq'); end
+        if (f.tag) then tag(model.EXPANSION_SHORT[f.tag] or f.tag, 'dim'); end
+        if (f.legendary) then tag('LGD', 'warn'); end
+        if (f.ki ~= 0 or f.quest) then tag('KI', 'warn'); end
+        rtext(up_r, style.col('good'), row.up > 0 and model.pct(row.up) or '-');
+        rtext(today_r, style.col(row.today > 0 and 'text' or 'dim', row.today > 0 and 255 or 160), row.today > 0 and tostring(row.today) or '-');
+    end
+    imgui.SetCursorPosY(top + #rows * rowh);
+    imgui.Dummy({ 1, 0 });
+    imgui.EndChild();
+end
+
+local function about(v)
+    return v < 10 and ('%.1f'):fmt(v) or model.gil(v);
+end
+
+local function fish_detail(s, you, f)
+    local fl = fishing.SKILL;
+    local lv = you.level[fl];
+    style.big(f.name, style.col(ui.band_key(fishing.band(f, lv))), 22);
+    if (f.id < 65535) then
+        linkable(f.id);
+    end
+    local tags = { { f.item and 'item' or (f.large and 'large fish' or 'small fish'), f.large and 'hq' or 'dim' } };
+    if (f.tag) then tags[#tags + 1] = { (model.EXPANSION_SHORT[f.tag] or f.tag) .. ' waters', 'dim' }; end
+    if (f.legendary) then tags[#tags + 1] = { 'legendary', 'warn' }; end
+    if (f.ki ~= 0) then
+        tags[#tags + 1] = { ('needs %s'):fmt(player.key_item_name(f.ki)), player.has_key_item(f.ki) and 'dim' or 'warn' };
+    end
+    if (f.quest) then tags[#tags + 1] = { 'only during its quest', 'warn' }; end
+    for i, t in ipairs(tags) do
+        if (i > 1) then imgui.SameLine(0, 6); end
+        style.tag(t[1], t[2]);
+    end
+    if (f.large and not f.item) then
+        dim('Large: a rod for large fish (Composite, Lu Shang\'s...) holds it best.');
+    end
+
+    imgui.Spacing();
+    if (f.item) then
+        imgui.TextColored(style.f('text'), ('Skill %d'):fmt(f.lv));
+        dim('An item: catching it never gives skill-ups.');
+    else
+        local best = math.max(0, f.lv - fishing.BEST);
+        style.tag(('start %d'):fmt(f.start), 'text');
+        imgui.SameLine(0, 6);
+        style.tag(('best %d'):fmt(best), 'good');
+        imgui.SameLine(0, 6);
+        style.tag(('cap %d'):fmt(f.lv), 'hq');
+        imgui.PushTextWrapPos(0);
+        dim(('Start at %d: from %d under it, skill-ups come more often and fewer than 1 in 10 get away for lack of skill. Anything up to %d under gives some.'):fmt(
+            f.start, fishing.START, fishing.REACH));
+        dim(('Best at %d, %d under: where the skill-up chance peaks.'):fmt(best, fishing.BEST));
+        if (f.lv > fishing.CAP) then
+            dim(('Cap %d is over fishing\'s cap of %d, so it gives skill-ups all the way.'):fmt(f.lv, fishing.CAP));
+        else
+            dim(('Cap %d: no more skill-ups from it once you reach %d.'):fmt(f.lv, f.lv));
+        end
+        imgui.PopTextWrapPos();
+
+        imgui.SeparatorText('Your odds');
+        local up = fishing.skillup(f, lv);
+        local lose = fishing.lose(f, lv);
+        style.tag(up > 0 and ('skill-up %s a catch'):fmt(model.pct(up)) or 'no skill-ups', up > 0 and 'good' or 'dim');
+        imgui.SameLine(0, 6);
+        style.tag(lose > 0 and ('gets away %s (skill)'):fmt(model.pct(lose)) or 'skill enough to land', lose > 0 and 'bad' or 'dim');
+        if (up <= 0) then
+            local cap = math.min((you.rank[fl] + 1) * 10, fishing.CAP);
+            if (lv >= cap and f.lv > lv) then
+                dim(('No skill-ups: capped at %d until you rank up.'):fmt(cap));
+            elseif (f.lv <= lv) then
+                dim('No skill-ups: you\'re at or over it.');
+            else
+                dim(('No skill-ups: more than %d levels over you.'):fmt(fishing.REACH));
+            end
+        else
+            local lo, hi = skill.range(s.skill, fl, you);
+            local n = fishing.catches(f, math.floor((lo + hi) / 2), you.rank[fl]);
+            if (n ~= nil) then
+                local nxt = math.floor(lo / 10) + 1;
+                local parts = { ('%s to Fishing %d'):fmt(about(n.next), nxt) };
+                if (n.cap_level > nxt) then
+                    parts[#parts + 1] = ('%s to %d, %s'):fmt(about(n.cap), n.cap_level, n.cap_level < f.lv and 'your rank\'s cap' or 'where it stops');
+                end
+                dim(('Catches on average: %s'):fmt(table.concat(parts, ', ')));
+                if (imgui.IsItemHovered()) then
+                    imgui.SetTooltip(('Worked out from Phoenix\'s skill-up rules level by level: the chance changes\nas you rise, and fish 10 or more over you now and then give 0.2.\n%s'):fmt(
+                        lo == hi and ('From your Fishing at %s.'):fmt(skill.fmt(lo)) or ('From the middle of %s-%s (your tenths aren\'t known exactly).'):fmt(skill.fmt(lo), skill.fmt(hi))));
+                end
+            end
+        end
+        dim('Outside a town on an ordinary moon. Near a new moon skill-ups');
+        dim('come more often; near a full moon and in towns, less.');
+        if (lv < 50) then
+            dim('Under 50, a Lu Shang\'s Fishing Rod makes them rarer.');
+        end
+    end
+    local today = s.fishday.fish[tostring(f.id)] or 0;
+    if (today > 0) then
+        imgui.TextColored(style.f('good'), ('%d caught today'):fmt(today));
+    end
+
+    imgui.SeparatorText('Bait and lures');
+    if (#f.bait == 0) then
+        dim('None listed: it only bites now and then, on anything.');
+    else
+        for i = 1, #f.bait, 2 do
+            local id, power = f.bait[i], f.bait[i + 1];
+            link(id, model.name(id));
+            imgui.SameLine(0, 8);
+            imgui.TextColored(style.f(power >= 3 and 'good' or power == 2 and 'text' or 'dim'), POWER[power] or '');
+        end
+    end
+
+    imgui.SeparatorText('Where it bites');
+    imgui.PushTextWrapPos(0);
+    for _, p in ipairs(fishing.places(f)) do
+        imgui.TextColored(style.f('text'), p[1]);
+        if (p[2] ~= '') then
+            imgui.SameLine(0, 8);
+            dim(p[2]);
+        end
+    end
+    imgui.PopTextWrapPos();
+end
+
+local function fish_legend()
+    for i, b in ipairs(FISH_LEGEND) do
+        if (i > 1) then imgui.SameLine(0, 10); end
+        style.dot(style.col(ui.band_key(b[1])));
+        imgui.SameLine(0, 2);
+        dim(b[2]);
+    end
+    imgui.SameLine(0, 24);
+    imgui.TextColored(style.f('dim', 170), 'L large  KI key item');
+end
+
+local function fish_body(s, you)
+    if (fishing.error ~= nil) then
+        imgui.TextColored(style.f('bad'), ('No fishing data (%s). Run tools/gen_fish.py.'):fmt(fishing.error));
+        return;
+    end
+    fish_toolbar(s);
+    imgui.Spacing();
+    local rows = fishing.rows(s, you.level[fishing.SKILL], s.fishday);
+    local selected = nil;
+    for _, row in ipairs(rows) do
+        if (row.f.id == s.fishsel) then
+            selected = row.f;
+            break;
+        end
+    end
+    if (selected == nil and rows[1] ~= nil) then
+        selected = rows[1].f;
+        s.fishsel = selected.id;
+    end
+    local aw, ah = imgui.GetContentRegionAvail();
+    local foot = imgui.GetTextLineHeightWithSpacing() + 6;
+    local head = imgui.GetTextLineHeightWithSpacing();
+    local lw = math.min(450, math.floor(aw * 0.55));
+    local bodyh = math.max(80, ah - foot - head);
+    imgui.BeginGroup();
+    fish_list(s, rows, lw, bodyh);
+    imgui.EndGroup();
+    imgui.SameLine();
+    imgui.BeginChild('ar_fdetail', { 0, bodyh + head }, ImGuiChildFlags_Borders);
+    if (selected ~= nil) then
+        fish_detail(s, you, selected);
+    end
+    imgui.EndChild();
+    fish_legend();
+end
+
 -- The settings window: look, expansions, what the list shows, skill bonuses, prices.
 local function settings_window(s)
     local open = { true };
@@ -877,7 +1236,8 @@ function ui.draw(s, you, save)
     ui.reset = false;
     style.push_window();
     style.push_controls();
-    local title = ('allrecipes - %s%s###allrecipes'):fmt(player.CRAFTS[s.craft].name, s.desynth and ' desynthesis' or '');
+    local fish = s.craft == fishing.SKILL;
+    local title = ('allrecipes - %s%s###allrecipes'):fmt(player.skill_info(s.craft).name, (s.desynth and not fish) and ' desynthesis' or '');
     -- No close button: a - in its place minimizes it to the icon (/ar hides it).
     if (imgui.Begin(title, nil, bit.bor(ImGuiWindowFlags_NoSavedSettings, ImGuiWindowFlags_NoCollapse))) then
         local wx, wy = imgui.GetWindowPos();
@@ -885,10 +1245,20 @@ function ui.draw(s, you, save)
         if (tray.title_button('##ar_minimize', wx, wy, ww, { text = style.col('text'), hover = style.col('bar', 250), held = style.col('edge', 230) })) then
             s.minimized, ui.dirty = true, true;
         end
-        if (model.error ~= nil) then
-            imgui.TextColored(style.f('bad'), ('No recipe data (%s). Run tools/gen_recipes.py.'):fmt(model.error));
-        else
+        -- A chip in the header can switch between a craft and fishing; the rest of the frame
+        -- is left out then, and drawn for the new tab next frame.
+        local craft = s.craft;
+        if (fish) then
             header(s, you);
+            imgui.Spacing();
+            if (s.craft == craft) then
+                fish_body(s, you);
+            end
+        elseif (model.error ~= nil) then
+            imgui.TextColored(style.f('bad'), ('No recipe data (%s). Run tools/gen_recipes.py.'):fmt(model.error));
+        elseif (header(s, you) or s.craft ~= craft) then
+            imgui.Spacing();
+        else
             imgui.Spacing();
             toolbar(s);
             imgui.Spacing();

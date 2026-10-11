@@ -16,14 +16,18 @@
 * Your craft levels show to the tenth once your skill-up messages have told it (skill.lua), and
 * the crystals in your inventory are counted at the top.
 *
+* The Fish tab is a fishing atlas (fishing.lua): every fish, the level to start it and the level
+* it stops giving skill-ups, where it bites and on what bait, and the fish you've caught today
+* (counted until midnight in Japan).
+*
 * Nothing is ever sent to the server and nothing is asked of it: allrecipes only reads client
 * memory and the packets the game receives anyway.
 --]]
 
 addon.name    = 'allrecipes';
 addon.author  = 'Relli';
-addon.version = '0.4.3';
-addon.desc    = 'Every era recipe by craft, with your odds, skill-ups, HQ rates and profit.';
+addon.version = '0.5';
+addon.desc    = 'Every era recipe by craft, with your odds, skill-ups, HQ rates and profit; and a fishing atlas.';
 addon.link    = 'https://github.com/relliko/allrecipes';
 
 require('common');
@@ -36,12 +40,13 @@ local ui       = require('ui');
 local ah       = require('ahhistory');
 local tray     = require('tray');
 local skill    = require('skill');
+local fishing  = require('fishing');
 
 local defaults = T{
     visible    = false,
     minimized  = false,   -- shown as an icon at the bottom right instead
     x = 120, y = 120, w = 900, h = 560,
-    craft      = 1,       -- the tab: 1 woodworking .. 8 cooking
+    craft      = 1,       -- the tab: 1 woodworking .. 8 cooking, 9 fishing
     desynth    = false,
     skillups   = false,   -- only recipes that can raise the craft
     sell       = 'AH',    -- what the profit assumes: 'AH' or 'NPC'
@@ -56,11 +61,20 @@ local defaults = T{
     search     = '',
     selected   = 0,       -- the recipe shown
     cfg        = false,   -- the settings window is open
-    theme      = 'clean', -- 'clean' (scouter's), 'guild' or 'vanadiel'
+    theme      = 'clean', -- 'clean' (scouter's), 'guild', 'vanadiel' or 'phoenix'
     ahread     = true,    -- keep the AH price history of what you look at
     ahbasis    = 'single',-- where an item has both, its AH price comes from 'single' or 'stack' sales
     -- Each craft's skill in tenths, as a range (skill.lua); -1 not known yet. Per character.
-    skill      = T{ lo = T{ -1, -1, -1, -1, -1, -1, -1, -1 }, hi = T{ -1, -1, -1, -1, -1, -1, -1, -1 } },
+    -- Each craft's skill in tenths, then fishing's.
+    skill      = T{ lo = T{ -1, -1, -1, -1, -1, -1, -1, -1, -1 }, hi = T{ -1, -1, -1, -1, -1, -1, -1, -1, -1 } },
+    -- The fishing atlas.
+    fishsort   = 'cap',
+    fishdir    = 1,
+    fishups    = false,   -- only fish that give you skill-ups
+    fishitems  = true,    -- list items (logs, buckets ...) as well as fish
+    fishsel    = 0,       -- the fish shown
+    -- Today's catches (Japan's day, fishing.lua): days since 1970, how many, and how many of each.
+    fishday    = T{ day = -1, count = 0, fish = T{ } },
 };
 
 local ar = { settings = nil };
@@ -95,22 +109,31 @@ local function fix(s)
         if (type(s.skill[k]) ~= 'table') then
             s.skill[k] = T{ };
         end
-        for c = 1, 8 do
+        for c = 1, 9 do
             if (type(s.skill[k][c]) ~= 'number') then
                 s.skill[k][c] = -1;
             end
         end
+    end
+    if (type(s.craft) ~= 'number' or s.craft < 1 or s.craft > 9) then
+        s.craft = 1;
+    end
+    local day = s.fishday;
+    if (type(day) ~= 'table' or type(day.day) ~= 'number' or type(day.count) ~= 'number' or type(day.fish) ~= 'table') then
+        s.fishday = T{ day = -1, count = 0, fish = T{ } };
     end
 end
 
 local CRAFT_NAMES = {
     wood = 1, woodworking = 1, smith = 2, smithing = 2, gold = 3, goldsmithing = 3, cloth = 4, clothcraft = 4,
     leather = 5, leathercraft = 5, bone = 6, bonecraft = 6, alchemy = 7, alch = 7, cook = 8, cooking = 8,
+    fish = 9, fishing = 9,
 };
 
 local function help()
     msg('/allrecipes (or /ar)   show or hide the window, or bring it back from its icon');
     msg('/ar <craft>   open it on a craft: wood, smith, gold, cloth, leather, bone, alchemy, cook');
+    msg('/ar fish   open the fishing atlas: every fish, its start and cap levels, and today\'s catches');
     msg('/ar min   minimize it to an icon at the bottom right; click the icon to bring it back');
     msg('/ar prices export [file]   save your prices as JSON (in config/addons/allrecipes)');
     msg('/ar prices import <file>   add prices from JSON: {"4098": 90} or [{"id": 4098, "price": 90}]');
@@ -141,6 +164,10 @@ local function debug()
         priced = priced + 1;
     end
     msg(('%d recipes (%d synthesis, %d desynthesis); %d prices typed in'):fmt(n, synth, n - synth, priced));
+    local day = ar.settings.fishday;
+    fishing.roll(day);
+    msg(('%d fish in the atlas; %d caught today, %d:%02d until midnight in Japan'):fmt(#(fishing.list or { }), day.count,
+        math.floor(fishing.until_reset() / 3600), math.floor(fishing.until_reset() % 3600 / 60)));
     msg(tray.status());
 end
 
@@ -152,6 +179,9 @@ ashita.events.register('load', 'allrecipes_load', function ()
     ui.search[1] = ar.settings.search or '';
     if (not model.load()) then
         err(('No recipe data (%s). Run tools/gen_recipes.py.'):fmt(tostring(model.error)));
+    end
+    if (not fishing.load()) then
+        err(('No fishing data (%s). Run tools/gen_fish.py.'):fmt(tostring(fishing.error)));
     end
     prices.load();
     if (prices.error ~= nil) then
@@ -264,13 +294,24 @@ ashita.events.register('command', 'allrecipes_command', function (e)
 end);
 
 -- The auction house opened (the server's 0x04C): watch for price histories. A battle message
--- (0x029): a skill-up, for the tenths. Only read.
+-- (0x029): a skill-up, for the tenths. A message with a number (0x027): maybe a catch, naming
+-- the fish. Only read.
 ashita.events.register('packet_in', 'allrecipes_packet_in', function (e)
     if (e.id == 0x04C) then
         ah.arm(os.clock());
     elseif (e.id == 0x029 and ar.settings ~= nil) then
         skill.packet(ar.settings.skill, e.data, player.id(), player.you(ar.settings.gear, ar.settings.support), os.clock());
+    elseif (e.id == 0x027) then
+        fishing.packet(e.data, player.id(), os.clock());
     end
+end);
+
+-- Your "<you> caught <fish>!" lines count today's catches.
+ashita.events.register('text_in', 'allrecipes_text_in', function (e)
+    if (ar.settings == nil or e.injected) then
+        return;
+    end
+    fishing.line(ar.settings.fishday, e.message, player.name(), os.clock());
 end);
 
 ashita.events.register('d3d_present', 'allrecipes_present', function ()
@@ -289,8 +330,9 @@ ashita.events.register('d3d_present', 'allrecipes_present', function ()
     ah.tick(now);
     local you = player.you(s.gear, s.support);
     skill.sync(s.skill, you, now);
-    if (skill.dirty) then
-        skill.dirty = false;
+    fishing.roll(s.fishday);
+    if (skill.dirty or fishing.dirty) then
+        skill.dirty, fishing.dirty = false, false;
         save();
     end
     if (s.visible and s.minimized) then

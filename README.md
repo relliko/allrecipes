@@ -12,6 +12,7 @@ Every era synthesis and desynthesis recipe on PhoenixXI, by craft, for Ashita v4
 - Ctrl+click any item to open its page on ffxiah.com, and from there whichever wiki you like.
 - Your craft levels show to the tenth (22.4), worked out from your skill-up messages.
 - The crystals in your inventory are counted at the top of the window.
+- The **Fish** tab is a fishing atlas: every fish with the level to start it and the level it caps at, your skill-up chance, the bait it takes, where it bites, and how many fish you've caught today. See [Fishing atlas](#fishing-atlas).
 
 Nothing is ever sent to the server and nothing is asked of it: allrecipes only reads client memory and the packets the game receives anyway. Phoenix only allows tools on its [approved addon list](https://phoenix-xi.com/approved-addons), so check it's there before using it on the server.
 
@@ -24,6 +25,7 @@ Nothing is ever sent to the server and nothing is asked of it: allrecipes only r
 |---|---|
 | `/allrecipes` or `/ar` | show or hide the window, or bring it back from its icon |
 | `/ar <craft>` | open it on a craft: `wood`, `smith`, `gold`, `cloth`, `leather`, `bone`, `alchemy`, `cook` |
+| `/ar fish` | open the fishing atlas |
 | `/ar min` | minimize it to an icon at the bottom right |
 | `/ar prices export [file]` | save your prices as JSON (`prices.json` in `config/addons/allrecipes`) |
 | `/ar prices import <file>` | add prices from JSON |
@@ -37,7 +39,7 @@ Nothing is ever sent to the server and nothing is asked of it: allrecipes only r
 - **Crystals:** at the top right, the eight crystals with how many of each are in your inventory, in the game's own icons. The one the recipe shown needs is outlined, its count in red if you have none. Hover one to see its clusters and HQ crystals (Inferno Crystal and the like) too. In a narrow window they go in two rows, or under your level.
 - **Toolbar:** switch between synthesis and desynthesis, all recipes or skill-ups, and selling on the AH or to an NPC. **can make** hides recipes you can't make now: too low in any craft they use (sub-crafts included) to start them, sure to break, or missing their key item.
 - **Settings chip:** opens a settings window where you can:
-  - pick the theme: clean (scouter's), guild (warm leather and gold) or Vana'diel (the game's blue menus);
+  - pick the theme: clean (scouter's), guild (warm leather and gold), Vana'diel (the game's blue menus) or Phoenix (Phoenix's red and gold, like facelift's);
   - hide expansions;
   - hide recipes where the craft is only a sub-craft, or recipes that need a key item;
   - add a skill bonus for gear or moghancements;
@@ -46,6 +48,28 @@ Nothing is ever sent to the server and nothing is asked of it: allrecipes only r
 - **Tooltips:** hover over a profit in the list to see how it adds up.
 
 Image support counts toward your odds. Under your level there's a **support** selector for the craft you're on: **auto** counts what's on you (it starts at +1, and if it's still up after 2 minutes it must be advanced support or a guild belt, so it turns +3 by itself; click auto again to switch), or pick **none**, **+1** or **+3** to see the odds as if you had it. The choice is kept for each craft. Advanced support's lower break loss isn't counted.
+
+## Fishing atlas
+The **Fish** chip after the crafts opens it. Your fishing level is shown to the tenth, the same way the crafts are.
+
+Each fish has three levels. They come from Phoenix's skill-up code (`FishingSkillup` in `src/map/utils/fishingutils.cpp`):
+- **Cap**: the fish's own skill level. It gives skill-ups only while you're under it, so reaching it ends them. A fish over 100 gives them all the way to fishing's cap.
+- **Start**: 20 levels under the cap. A fish more than 7 levels over you can get away for lack of skill, 0.8% more for each level past 7. From 20 under, fewer than 1 in 10 get away that way, and the skill-up chance is above its floor. Any fish up to 50 levels over you gives some skill-ups.
+- **Best**: 11 under the cap, where the skill-up chance peaks.
+
+Pick a fish to see:
+- your skill-up chance on each catch, and how many catches it takes on average to reach your next level and the fish's cap;
+- the bait and lures it takes, and how well (best, good or bites);
+- every zone and spot where it bites;
+- whether it's a large fish, needs a key item, or is legendary.
+
+The chance shown is for fishing outside a town on an ordinary moon. Skill-ups come more often near a new moon, and less often near a full moon or in a town. Under level 50, a Lu Shang's Fishing Rod makes them rarer. Items such as logs and buckets never give skill-ups; the **items** chip hides them.
+
+**Caught today**, at the top right, counts your own "caught" lines. The count starts over at midnight in Japan (15:00 UTC), when the game's daily limits reset, and the list's **Today** column shows how many of each fish you've caught. Fish you couldn't carry and monsters don't count. Catches made while the addon isn't loaded can't be counted. The count is kept for each character.
+
+The fish come from Phoenix's fishing tables. To update them:
+
+    python tools/gen_fish.py --phoenix C:\code\Phoenix
 
 ## Your skill to the tenth
 The server keeps craft skill in tenths but only tells your client whole levels. Every skill-up does come with a message, though: "skill rises 0.3 points", and "reaches level 23" when that crosses a level. allrecipes reads those (only reads; they're the packets the game receives anyway) and keeps your skill as a range that each skill-up narrows:

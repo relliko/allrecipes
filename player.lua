@@ -21,6 +21,14 @@ player.CRAFTS = {
     { name = 'Cooking',      short = 'Cook',    skill = 56, imagery = 243 },
 };
 
+-- Fishing isn't a craft, but its skill is kept beside them, as the ninth (the atlas, fishing.lua).
+player.FISHING = { name = 'Fishing', short = 'Fish', skill = 48 };
+
+-- A skill's name: the eight crafts, then fishing.
+function player.skill_info(c)
+    return player.CRAFTS[c] or player.FISHING;
+end
+
 player.RANKS = { [0] = 'Amateur', 'Recruit', 'Initiate', 'Novice', 'Apprentice', 'Journeyman', 'Craftsman',
                  'Artisan', 'Adept', 'Veteran', 'Expert', 'Authority' };
 
@@ -31,7 +39,7 @@ local FREE_LASTS = 125;
 -- The game's craft skill: level, rank and capped for one craft.
 local function craft_skill(c)
     local p = AshitaCore:GetMemoryManager():GetPlayer();
-    local s = p ~= nil and p:GetCraftSkill(player.CRAFTS[c].skill - 48) or nil;
+    local s = p ~= nil and p:GetCraftSkill(player.skill_info(c).skill - 48) or nil;
     if (s == nil) then
         return 0, 0, false;
     end
@@ -82,13 +90,16 @@ function player.support(c, support)
 end
 
 -- What odds.lua works with: { level, bonus, rank, capped }, bonus being image support plus the
--- gear bonus you set for each craft.
+-- gear bonus you set for each craft. Fishing follows the crafts, as the ninth, with no bonus.
 function player.you(gear, support)
     local you = { level = { }, bonus = { }, rank = { }, capped = { } };
     for c = 1, #player.CRAFTS do
         you.level[c], you.rank[c], you.capped[c] = craft_skill(c);
         you.bonus[c] = player.support(c, support) + (gear and gear[c] or 0);
     end
+    local f = #player.CRAFTS + 1;
+    you.level[f], you.rank[f], you.capped[f] = craft_skill(f);
+    you.bonus[f] = 0;
     return you;
 end
 
@@ -134,6 +145,12 @@ function player.crystals(now)
     end
     held.counts, held.at = counts, now;
     return counts;
+end
+
+-- Your name (empty at the character screen).
+function player.name()
+    local party = AshitaCore:GetMemoryManager():GetParty();
+    return party ~= nil and (party:GetMemberName(0) or '') or '';
 end
 
 function player.has_key_item(id)

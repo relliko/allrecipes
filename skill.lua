@@ -1,6 +1,6 @@
 --[[
 * allrecipes - skill
-* Your craft skill to the tenth. The server keeps skill in tenths but only tells the client whole
+* Your craft skill (and fishing's) to the tenth. The server keeps skill in tenths but only tells the client whole
 * levels (0x062). Every skill-up it does tell, though, in a battle message (0x029, synthutils.cpp):
 *   38  SkillGain     "<skill> skill rises 0.X points"   (param the skill, value the tenths)
 *   53  SkillLevelUp  "<skill> skill reaches level X"    (sent when a gain crosses a level)
@@ -21,8 +21,12 @@ local skill = {
 skill.GAIN, skill.LEVEL, skill.DROP = 38, 53, 310;
 local SETTLE = 3;    -- seconds for the client's whole level to catch up with a message
 
--- Skill ids 49 (woodworking) to 56 (cooking) are the crafts 1 to 8.
+-- Skill ids 49 (woodworking) to 56 (cooking) are the crafts 1 to 8, and 48 fishing is the ninth
+-- (fishingutils.cpp sends the same messages).
 local function craft_of(id)
+    if (id == 48) then
+        return 9;
+    end
     return (id >= 49 and id <= 56) and id - 48 or nil;
 end
 
@@ -103,7 +107,7 @@ function skill.sync(t, you, now)
     if (not any) then
         return;
     end
-    for c = 1, 8 do
+    for c = 1, 9 do
         local level = you.level[c];
         local seen = skill.seen[c];
         if (seen == nil or seen[1] ~= level) then

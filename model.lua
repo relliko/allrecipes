@@ -21,6 +21,7 @@ local model = {
 -- The expansions recipes can come from (the data's tags), in order, as they're shown.
 model.EXPANSIONS = { { tag = 'ROTZ', name = 'RoZ' }, { tag = 'COP', name = 'CoP' }, { tag = 'TOAU', name = 'ToAU' }, { tag = 'WOTG', name = 'WotG' } };
 local SHORT_TAG = { ROTZ = 'RoZ', COP = 'CoP', TOAU = 'ToAU', WOTG = 'WotG' };
+model.EXPANSION_SHORT = SHORT_TAG;
 
 local function load_data(name)
     local f, why = loadfile(('%s\\data\\%s.lua'):fmt(addon.path, name));

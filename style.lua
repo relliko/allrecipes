@@ -5,6 +5,7 @@
 *   clean    - scouter's: neutral grey, amber for what's picked
 *   guild    - warm leather and parchment, gold for what's picked
 *   vanadiel - the game's own blue menu windows, with its gold cursor
+*   phoenix  - Phoenix's ember red on near-black (facelift's phoenix theme)
 * Colours for how hard a recipe is are part of each theme.
 --]]
 
@@ -13,7 +14,7 @@ local imgui = require('imgui');
 
 local style = { theme = 'clean' };
 
-style.THEMES = { { 'clean', 'Clean' }, { 'guild', 'Guild' }, { 'vanadiel', 'Vana\'diel' } };
+style.THEMES = { { 'clean', 'Clean' }, { 'guild', 'Guild' }, { 'vanadiel', 'Vana\'diel' }, { 'phoenix', 'Phoenix' } };
 
 -- Colours are { r, g, b } (0-255); alpha is given where they're used.
 local THEMES = {
@@ -83,6 +84,28 @@ local THEMES = {
         band_good  = { 132, 222, 146 },
         band_safe  = { 238, 242, 252 },
         band_hq    = { 132, 206, 255 },
+    },
+    phoenix = {  -- facelift's phoenix theme (ui/theme.lua), its 0-1 colours as these
+        panel  = { 24, 14, 14 },    panel_a = 230,
+        edge   = { 110, 72, 72 },
+        face   = { 16, 9, 9 },
+        text   = { 255, 248, 248 },
+        dim    = { 160, 124, 124 },
+        bar    = { 66, 40, 40 },
+        chip   = { 50, 31, 31 },
+        accent = { 197, 81, 81 },    -- Phoenix red
+        good   = { 99, 186, 138 },
+        bad    = { 240, 110, 96 },
+        hq     = { 132, 190, 232 },
+        warn   = { 214, 176, 64 },   -- Phoenix gold
+        shadow = { 0, 0, 0 },
+        band_cant  = { 118, 92, 92 },
+        band_zero  = { 240, 110, 96 },
+        band_hard  = { 232, 140, 76 },
+        band_risky = { 230, 196, 88 },
+        band_good  = { 99, 186, 138 },
+        band_safe  = { 255, 248, 248 },
+        band_hq    = { 132, 190, 232 },
     },
 };
 
