@@ -28,6 +28,8 @@ ABYSSEA = {15, 45, 132, 215, 216, 217, 218, 253, 254, 255}
 # Rods left out: the GM's Judge's Rod, the goldfish-scooping basket, and the Maze Monger rod and
 # the +1 Ebisu and Lu Shang's, which came after the era.
 LATER_RODS = {17012, 17013, 19319, 19320, 19321}
+# Fishing gear left out as after the era: Fisher's Torque and the Fisherman's Smock.
+LATER_GEAR = {10925, 11337}
 MOD_ROD = re.compile(r"^UPDATE `?fishing_rod`? SET `?(max_rank|min_rank)`? = (\d+) where `?name`? = '((?:[^'\\]|\\.)*)';", re.I)
 
 
@@ -78,6 +80,18 @@ def read_rods(phoenix):
             if name in rods:
                 rods[name]["min" if m.group(1).lower() == "min_rank" else "max"] = int(m.group(2))
     return sorted(rods.values(), key=lambda r: (-r["rating"], r["name"]))
+
+
+def read_gear(phoenix):
+    """Gear that adds fishing skill (mod 127, FISH): (item id, skill, slot bits), era only."""
+    skill = {}
+    for m in re.finditer(r"^INSERT INTO `item_mods` VALUES \((\d+),127,(-?\d+)\)", (phoenix / "sql" / "item_mods.sql").read_text(encoding="utf-8"), re.M):
+        if int(m.group(1)) not in LATER_GEAR:
+            skill[int(m.group(1))] = int(m.group(2))
+    slots = {}
+    for m in re.finditer(r"^INSERT INTO `item_equipment` VALUES \((\d+),'[^']*',\d+,\d+,\d+,\d+,\d+,\d+,(\d+),", (phoenix / "sql" / "item_equipment.sql").read_text(encoding="utf-8"), re.M):
+        slots[int(m.group(1))] = int(m.group(2))
+    return sorted((i, v, slots.get(i, 0)) for i, v in skill.items() if v > 0)
 
 
 def main():
@@ -133,6 +147,9 @@ def main():
     for r in rods:
         out.append("        { %d, %s, %d, %d, %d, %d, %d, %d }," % (
             r["id"], lua_str(r["name"]), r["size"], r["min"], r["max"], r["breakable"], r["legendary"], r["rating"]))
+    out += ["    },", "    -- gear: { item id, fishing skill, equipment slot bits }", "    gear = {"]
+    for g in read_gear(Path(args.phoenix)):
+        out.append("        { %d, %d, %d }," % g)
     out += ["    },", "    zones = {"]
     for z in used_zones:
         out.append("        [%d] = %s," % (z, lua_str(zones.get(z, "Zone %d" % z))))

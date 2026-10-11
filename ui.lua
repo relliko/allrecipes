@@ -843,7 +843,15 @@ function ui.fish_header(s, you)
             over = over + 1;
         end
     end
-    dim(('%d fish give you skill-ups'):fmt(over));
+    local worn, pieces = fishing.worn_gear();
+    dim(('%d fish give you skill-ups%s'):fmt(over, worn > 0 and (', gear +%d'):fmt(worn) or ''));
+    if (worn > 0 and imgui.IsItemHovered()) then
+        local names = { };
+        for _, id in ipairs(pieces) do
+            names[#names + 1] = model.name(id);
+        end
+        imgui.SetTooltip(('Wearing %s: +%d fishing skill for landing fish (not for skill-ups).'):fmt(table.concat(names, ', '), worn));
+    end
     if (capped) then
         imgui.SameLine(0, 6);
         style.tag('capped', 'hq');
@@ -901,22 +909,51 @@ local function fish_toolbar(s)
     end
     imgui.PopItemWidth();
     if (chip('##ar_cfg', 'settings', s.cfg, nil, 8)) then s.cfg, ui.dirty = not s.cfg, true; end
+
+    -- The gear the numbers assume: skill for landing fish, and Pelican Ring rolls for skill-ups.
+    local full, worn = fishing.full_gear(), fishing.worn_gear();
+    local choices = { { 'none', 'no gear' }, { 'full', ('best gear +%d'):fmt(full) }, { 'worn', ('what you wear +%d'):fmt(worn) } };
+    for i, c in ipairs(choices) do
+        local hit;
+        if (i == 1) then
+            hit = style.chip('##ar_fg_' .. c[1], c[2], s.fishgear == c[1]);
+        else
+            hit = chip('##ar_fg_' .. c[1], c[2], s.fishgear == c[1]);
+        end
+        if (hit) then
+            s.fishgear, ui.dirty = c[1], true;
+        end
+        if (imgui.IsItemHovered()) then
+            imgui.SetTooltip(({
+                none = 'The numbers with no fishing gear on.',
+                full = ('With the best fishing gear of the era: a Fisherman\'s or Angler\'s tunica,\ngloves and hose (+1 each) and Waders (+2): +%d fishing skill.'):fmt(full),
+                worn = 'With the fishing gear you have on now.',
+            })[c[1]] .. '\nGear\'s fishing skill helps you land fish (fewer get away, lines snap and\nrods break), but skill-ups go by your own level.');
+        end
+    end
+    local pel = s.fishpelican or 0;
+    if (chip('##ar_fpel', pel == 0 and 'Pelican Ring off' or ('Pelican Ring x%d'):fmt(pel), pel > 0, 'good', 16)) then
+        s.fishpelican, ui.dirty = (pel + 1) % 3, true;
+    end
+    if (imgui.IsItemHovered()) then
+        imgui.SetTooltip('Click to count a Pelican Ring\'s effect (up to two at once): each gives a catch\none more skill-up roll. It lasts 20 minutes after you use the ring.');
+    end
 end
 
 -- A fish's gear in short, for its row's tooltip: the least rods that hold it and its best bait.
-local function fish_gear(f, lv)
+local function fish_gear(f, sk)
     local rods, best = { }, nil;
-    for _, r in ipairs(fishing.rods_for(f, lv)) do
+    for _, r in ipairs(fishing.rods_for(f, sk)) do
         if (best == nil) then
             best = r;
         end
-        if (r.risk == best.risk and r.hook == best.hook and #rods < 3) then
+        if (r.own == best.own and r.hook == best.hook and #rods < 3) then
             rods[#rods + 1] = r.rod.name;
         end
     end
     local lines = { f.name };
     if (best ~= nil) then
-        lines[#lines + 1] = ('Rod: %s%s'):fmt(table.concat(rods, ', '), best.risk > 0 and (' (still loses it %s)'):fmt(model.pct(best.risk)) or ' or better');
+        lines[#lines + 1] = ('Rod: %s%s'):fmt(table.concat(rods, ', '), best.own > 0 and (' (still loses it %s)'):fmt(model.pct(best.own)) or ' or better');
     end
     local bait = { };
     for i = 1, #f.bait, 2 do
@@ -928,7 +965,7 @@ local function fish_gear(f, lv)
     return table.concat(lines, '\n');
 end
 
-local function fish_list(s, rows, width, height, lv)
+local function fish_list(s, rows, width, height, sk)
     local today_r = width - 24;
     local up_r = today_r - 56;
     local tag_x = up_r - 50 - 84;
@@ -957,7 +994,7 @@ local function fish_list(s, rows, width, height, lv)
     head('Start', 'start', 8, false, true, ('The level to start fishing it: %d under its cap. From there skill-ups\ncome more often and fewer than 1 in 10 get away for lack of skill.'):fmt(fishing.START));
     head('Cap', 'cap', 52, false, false, 'Its skill level: no more skill-ups from it once you reach it.');
     head('Fish', 'name', 88);
-    head('Up', 'up', up_r, true, false, 'Your skill-up chance a catch, outside a town on an ordinary moon.');
+    head('Up', 'up', up_r, true, false, 'Your skill-up chance a catch, outside a town (with the Pelican Ring set above).');
     head('Today', 'today', today_r, true, false, 'How many you\'ve caught today (Japan\'s day).');
 
     imgui.BeginChild('ar_flist', { width, height }, ImGuiChildFlags_Borders);
@@ -986,7 +1023,7 @@ local function fish_list(s, rows, width, height, lv)
             end
         end
         if (imgui.IsItemHovered()) then
-            imgui.SetTooltip(imgui.GetIO().KeyCtrl and ('Click: open %s on ffxiah.com'):fmt(f.name) or fish_gear(f, lv));
+            imgui.SetTooltip(imgui.GetIO().KeyCtrl and ('Click: open %s on ffxiah.com'):fmt(f.name) or fish_gear(f, sk));
         end
         local function text(x, col, t)
             dl:AddText({ x0 + x, y0 }, col, t);
@@ -1020,9 +1057,10 @@ local function about(v)
     return v < 10 and ('%.1f'):fmt(v) or model.gil(v);
 end
 
-local function fish_detail(s, you, f)
+local function fish_detail(s, you, f, g)
     local fl = fishing.SKILL;
     local lv = you.level[fl];
+    local sk = lv + g.bonus;
     style.big(f.name, style.col(ui.band_key(fishing.band(f, lv))), 22);
     if (f.id < 65535) then
         linkable(f.id);
@@ -1054,7 +1092,7 @@ local function fish_detail(s, you, f)
         imgui.SameLine(0, 6);
         style.tag(('cap %d'):fmt(f.lv), 'hq');
         imgui.PushTextWrapPos(0);
-        dim(('Start at %d: from %d under it, skill-ups come more often and fewer than 1 in 10 get away for lack of skill. Anything up to %d under gives some.'):fmt(
+        dim(('Start at %d: from %d under it, skill-ups come more often and fewer than 1 in 10 get away for lack of skill. Anything less than %d under gives some.'):fmt(
             f.start, fishing.START, fishing.REACH));
         dim(('Best at %d, %d under: where the skill-up chance peaks.'):fmt(best, fishing.BEST));
         if (f.lv > fishing.CAP) then
@@ -1065,8 +1103,8 @@ local function fish_detail(s, you, f)
         imgui.PopTextWrapPos();
 
         imgui.SeparatorText('Your odds');
-        local up = fishing.skillup(f, lv);
-        local lose = fishing.lose(f, lv);
+        local up = fishing.skillup(f, lv, g.rolls);
+        local lose = fishing.lose(f, sk);
         style.tag(up > 0 and ('skill-up %s a catch'):fmt(model.pct(up)) or 'no skill-ups', up > 0 and 'good' or 'dim');
         imgui.SameLine(0, 6);
         style.tag(lose > 0 and ('gets away %s (skill)'):fmt(model.pct(lose)) or 'skill enough to land', lose > 0 and 'bad' or 'dim');
@@ -1081,7 +1119,7 @@ local function fish_detail(s, you, f)
             end
         else
             local lo, hi = skill.range(s.skill, fl, you);
-            local n = fishing.catches(f, math.floor((lo + hi) / 2), you.rank[fl]);
+            local n = fishing.catches(f, math.floor((lo + hi) / 2), you.rank[fl], g.rolls);
             if (n ~= nil) then
                 local nxt = math.floor(lo / 10) + 1;
                 local parts = { ('%s to Fishing %d'):fmt(about(n.next), nxt) };
@@ -1095,8 +1133,10 @@ local function fish_detail(s, you, f)
                 end
             end
         end
-        dim('Outside a town on an ordinary moon. Near a new moon skill-ups');
-        dim('come more often; near a full moon and in towns, less.');
+        imgui.PushTextWrapPos(0);
+        dim(('Outside a town (in one, skill-ups are rarer)%s. Getting away is at fishing skill %d%s.'):fmt(
+            g.rolls > 1 and (', with %d skill-up rolls a catch'):fmt(g.rolls) or '', sk, g.bonus > 0 and (' (your %d, +%d from gear)'):fmt(lv, g.bonus) or ''));
+        imgui.PopTextWrapPos();
         if (lv < 50) then
             dim('Under 50, a Lu Shang\'s Fishing Rod makes them rarer.');
         end
@@ -1112,8 +1152,8 @@ local function fish_detail(s, you, f)
     imgui.SeparatorText('Rods');
     -- The four plainest that hold it and two that don't, and any you have.
     local held, bad, more_held, more_bad = 0, 0, 0, 0;
-    for _, r in ipairs(fishing.rods_for(f, lv)) do
-        local ok = r.risk <= 0;
+    for _, r in ipairs(fishing.rods_for(f, sk)) do
+        local ok = r.own <= 0;
         local show = bag[r.rod.id] ~= nil or (ok and held < 4) or (not ok and bad < 2);
         if (not show) then
             if (ok) then more_held = more_held + 1; else more_bad = more_bad + 1; end
@@ -1127,8 +1167,8 @@ local function fish_detail(s, you, f)
             if (#parts == 0) then
                 parts[1] = r.hook == 0 and 'holds it' or r.hook == 3 and 'holds it, fewer bites (a large-fish rod)' or 'holds it, fewer bites (a small-fish rod)';
             end
-            local key = r.risk > 0 and (r.risk >= 0.25 and 'bad' or 'warn') or (r.hook == 0 and 'good' or 'text');
-            link(r.rod.id, r.rod.name, r.risk > 0 and 'dim' or 'text');
+            local key = r.own > 0 and (r.own >= 0.25 and 'bad' or 'warn') or (r.hook == 0 and 'good' or 'text');
+            link(r.rod.id, r.rod.name, r.own > 0 and 'dim' or 'text');
             if (bag[r.rod.id] ~= nil) then
                 imgui.SameLine(0, 6);
                 style.tag('yours', 'hq');
@@ -1145,7 +1185,10 @@ local function fish_detail(s, you, f)
         if (more_bad > 0) then parts[#parts + 1] = ('%d more lose%s it more often'):fmt(more_bad, more_bad == 1 and 's' or ''); end
         dim(table.concat(parts, '; ') .. '.');
     end
-    dim(('Worked out at your level (%d). Within 10 of it, every rod holds a little more.'):fmt(lv));
+    imgui.PushTextWrapPos(0);
+    dim(('At fishing skill %d%s. A Penguin Ring (a slower fight) and an Albatross Ring (30 more seconds) make the fight itself easier.'):fmt(
+        sk, g.bonus > 0 and (' (%d +%d gear)'):fmt(lv, g.bonus) or ''));
+    imgui.PopTextWrapPos();
 
     imgui.SeparatorText('Bait and lures');
     if (#f.bait == 0) then
@@ -1192,7 +1235,9 @@ local function fish_body(s, you)
     end
     fish_toolbar(s);
     imgui.Spacing();
-    local rows = fishing.rows(s, you.level[fishing.SKILL], s.fishday);
+    local g = fishing.setup(s);
+    local lv = you.level[fishing.SKILL];
+    local rows = fishing.rows(s, lv, s.fishday, g.rolls);
     local selected = nil;
     for _, row in ipairs(rows) do
         if (row.f.id == s.fishsel) then
@@ -1210,12 +1255,12 @@ local function fish_body(s, you)
     local lw = math.min(450, math.floor(aw * 0.55));
     local bodyh = math.max(80, ah - foot - head);
     imgui.BeginGroup();
-    fish_list(s, rows, lw, bodyh, you.level[fishing.SKILL]);
+    fish_list(s, rows, lw, bodyh, lv + g.bonus);
     imgui.EndGroup();
     imgui.SameLine();
     imgui.BeginChild('ar_fdetail', { 0, bodyh + head }, ImGuiChildFlags_Borders);
     if (selected ~= nil) then
-        fish_detail(s, you, selected);
+        fish_detail(s, you, selected, g);
     end
     imgui.EndChild();
     fish_legend();

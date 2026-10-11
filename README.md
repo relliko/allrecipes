@@ -61,7 +61,7 @@ Each fish has three levels. They come from Phoenix's skill-up code (`FishingSkil
 
 Pick a fish to see:
 - your skill-up chance on each catch, and how many catches it takes on average to reach your next level and the fish's cap;
-- the rods that hold it, plainest first, and what goes wrong with the ones that don't: the line snaps, the rod breaks, or the fish is too big or too small for the rod and gets away. These come from Phoenix's rules, using each fish's strength, each rod's ranks (with Phoenix's own changes to them) and your level, since every rod holds a little more within 10 levels of the fish. A large-fish rod on a small fish, or the other way round, also gets fewer bites;
+- the rods that hold it, plainest first, and what goes wrong with the ones that don't: the line snaps, the rod breaks, or the fish is too big or too small for the rod and gets away. These follow Phoenix's own fishing rules, from the fishing patch in its repo. They use each fish's strength, each rod's ranks (with Phoenix's own changes to them) and your fishing skill with gear. A large-fish rod lets a small fish go often, more so the higher the fish's level, and a rod of the wrong size gets fewer bites either way;
 - the bait and lures it takes, and how well (best, good or bites);
 - **yours** beside any rod or bait in your inventory.
 
@@ -69,7 +69,9 @@ Hover a fish in the list to see the least rod it needs and its best bait.
 - every zone and spot where it bites;
 - whether it's a large fish, needs a key item, or is legendary.
 
-The chance shown is for fishing outside a town on an ordinary moon. Skill-ups come more often near a new moon, and less often near a full moon or in a town. Under level 50, a Lu Shang's Fishing Rod makes them rarer. Items such as logs and buckets never give skill-ups; the **items** chip hides them.
+The chance shown is for fishing outside a town; in a town skill-ups are rarer. On Phoenix the moon doesn't change them. Under level 50, a Lu Shang's Fishing Rod makes them rarer.
+
+**Gear:** the chips under the toolbar pick the gear the numbers assume: no gear, the best of the era (+5 fishing skill: a Fisherman's or Angler's tunica, gloves and hose at +1 each, and Waders at +2) or what you have on. Gear's fishing skill helps you land fish (fewer get away, and lines snap and rods break less), but skill-ups go by your own level. The **Pelican Ring** chip counts the ring's effect, up to two at once: each gives a catch one more skill-up roll, which raises the skill-up chance and lowers the catches to your next level. Items such as logs and buckets never give skill-ups; the **items** chip hides them.
 
 **Caught today**, at the top right, counts your own "caught" lines. The count starts over at midnight in Japan (15:00 UTC), when the game's daily limits reset, and the list's **Today** column shows how many of each fish you've caught. Fish you couldn't carry and monsters don't count. Catches made while the addon isn't loaded can't be counted. The count is kept for each character.
 

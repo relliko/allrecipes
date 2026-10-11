@@ -21,6 +21,18 @@ return {
         { 17390, "Yew Fishing Rod", 0, 1, 6, 1, 0, 2 },
         { 17391, "Willow Fishing Rod", 0, 1, 5, 1, 0, 1 },
     },
+    -- gear: { item id, fishing skill, equipment slot bits }
+    gear = {
+        { 13808, 1, 32 },
+        { 13809, 1, 32 },
+        { 14070, 1, 64 },
+        { 14071, 1, 64 },
+        { 14171, 1, 256 },
+        { 14172, 1, 256 },
+        { 14195, 2, 256 },
+        { 14292, 1, 128 },
+        { 14293, 1, 128 },
+    },
     zones = {
         [1] = "Phanauet Channel",
         [2] = "Carpenters Landing",

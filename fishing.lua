@@ -8,6 +8,9 @@
 *   - the chance is a bell around 11 over (5 levels either way), never under 4, out of a roll of
 *     90, less 10 outside a town and less (20 - level / 3) under level 50;
 *   - items and monsters never give skill-ups.
+* Phoenix runs its own fishing patch over that (modules/temp_patch/phoenix-fishing.patch): no
+* moon in skill-ups, and its own rules for fish getting away, lines snapping and rods breaking
+* (fishing.rod).
 * A fish more than 7 levels over you can get away for lack of skill (0.8% a level past 7), so it's
 * worth starting 20 under its level: from there the chance climbs off its floor and fewer than 1
 * in 10 get away for it.
@@ -82,41 +85,112 @@ function fishing.load()
         fishing.rods[#fishing.rods + 1] = { id = r[1], name = name ~= '' and name or r[2], large = r[3] == 1, min = r[4], max = r[5],
                                             breakable = r[6] == 1, legendary = r[7] == 1, rating = r[8] };
     end
+    fishing.gear = t.gear or { };
     fishing.error, fishing.cache.stamp = nil, nil;
     return true;
 end
 
 --[[
-* How a rod does with a fish at your whole level `lv` (fishingutils.cpp: CalculateLoseChance,
-* CalculateSnapChance, CalculateBreakChance, CalculateHookChance). A fish's ranking is how
-* strong it is; a rod holds rankings up to its max_rank, and a large-fish rod lets go of small
-* fish ranked under its min_rank. +2 to what a rod holds when you're within 10 of the fish.
-*   lose  - it gets away, too big ('big') or too small ('small') for the rod;
-*   snap  - the line snaps;
-*   brk   - the rod breaks;
-*   hook  - bites lost to the wrong size of rod (3 for a fish smaller than it, 5 for bigger).
-* risk is the chance one of the first three happens.
+* Gear. Fishing skill from gear (the FISH mod: Fisherman's and Angler's pieces +1, Waders +2)
+* counts in everything about landing a fish, but not in skill-ups, which go by your own level
+* (GetFishingSkill vs FishingSkillup). A Pelican Ring's effect (up to two at once) gives a catch
+* one more skill-up roll each.
 --]]
-function fishing.rod(row, rod, lv)
+
+-- The most skill the era's gear gives: the best piece in each slot.
+function fishing.full_gear()
+    local best = { };
+    for _, g in ipairs(fishing.gear or { }) do
+        best[g[3]] = math.max(best[g[3]] or 0, g[2]);
+    end
+    local n = 0;
+    for _, v in pairs(best) do
+        n = n + v;
+    end
+    return n;
+end
+
+-- The fishing skill on what you wear, and the pieces.
+function fishing.worn_gear()
+    local inv = AshitaCore:GetMemoryManager():GetInventory();
+    if (inv == nil) then
+        return 0, { };
+    end
+    local by = { };
+    for _, g in ipairs(fishing.gear or { }) do
+        by[g[1]] = g[2];
+    end
+    local n, pieces = 0, { };
+    for slot = 0, 15 do
+        local e = inv:GetEquippedItem(slot);
+        local index = e ~= nil and e.Index or 0;
+        if (index ~= 0) then
+            local it = inv:GetContainerItem(bit.rshift(bit.band(index, 0xFF00), 8), bit.band(index, 0xFF));
+            local v = it ~= nil and by[it.Id] or nil;
+            if (v ~= nil) then
+                n = n + v;
+                pieces[#pieces + 1] = it.Id;
+            end
+        end
+    end
+    return n, pieces;
+end
+
+-- What the numbers assume, from the settings: skill from gear and skill-up rolls a catch.
+function fishing.setup(s)
+    local bonus = 0;
+    if (s.fishgear == 'full') then
+        bonus = fishing.full_gear();
+    elseif (s.fishgear == 'worn') then
+        bonus = fishing.worn_gear();
+    end
+    return { bonus = bonus, rolls = 1 + math.max(0, math.min(2, s.fishpelican or 0)) };
+end
+
+--[[
+* How a rod does with a fish at fishing skill `sk` (your level and gear), by Phoenix's rules
+* (its fishing patch, modules/temp_patch/phoenix-fishing.patch, over fishingutils.cpp's
+* CalculateLoseChance, CalculateSnapChance, CalculateBreakChance and CalculateHookChance). A
+* fish's ranking is how strong it is; a rod holds rankings up to its max_rank.
+*   lose  - it gets away: too big for the rod ('big': 50% less 1 a level you're over the fish),
+*           too small ('small': a large-fish rod lets a small fish go 1.8% a level of the fish, up
+*           to 90%) or for lack of skill ('skill': 0.8% a level past 7 over you, and every time
+*           50 or more over); the biggest of these;
+*   snap  - the line snaps: 19% a rank over what the rod holds (2 less with a small-fish rod on a
+*           large fish, 3 less for a legendary fish, 1 more with a legendary rod), up to 55%;
+*   brk   - the rod breaks: 10% a rank over (plus those penalties), up to 20%;
+*   hook  - bites lost to the wrong size of rod (3 for a fish smaller than it, 5 for bigger).
+* They're rolled in that order, each only if the last didn't happen; risk is one of them, own
+* the same leaving out a loss for lack of skill (which no rod changes).
+--]]
+function fishing.rod(row, rod, sk)
     local fs, rs = row.large and 1 or 0, rod.large and 1 or 0;
     local out = { lose = 0, why = nil, snap = 0, brk = 0, hook = 0 };
-    local near = lv + 10 > row.lv and 2 or 0;
+    local big, small = 0, 0;
     if (not rod.legendary) then
         if (fs > rs and row.rank > rod.max) then
-            out.lose, out.why = math.max(0, math.min(50, 50 + row.lv - lv)), 'big';
-        elseif (fs < rs and row.rank < rod.min) then
-            out.lose, out.why = math.max(0, math.min(50, 50 + row.lv - lv)), 'small';
+            big = math.max(0, math.min(50, 50 - (sk - row.lv)));
+        elseif (fs < rs) then
+            small = math.min(90, math.floor(row.lv * 1.8));
         end
         out.hook = fs < rs and 3 or rs < fs and 5 or 0;
+    end
+    local low = row.item and 0 or math.floor(fishing.lose(row, sk) * 100 + 0.5);
+    if (big > 0 and big > low) then
+        out.lose, out.why = big, 'big';
+    elseif (small > 0 and small > low) then
+        out.lose, out.why = small, 'small';
+    elseif (low > 0) then
+        out.lose, out.why = low, 'skill';
     end
     local pen = (not rod.legendary and fs > rs) and 2 or 0;
     local bonus = 0;
     if (row.legendary) then
         if (rod.legendary) then bonus = 1; else pen = pen + 3; end
     end
-    local hold = rod.max + near + bonus - pen;
+    local hold = rod.max + bonus - pen;
     if (row.rank > hold) then
-        out.snap = math.min(55, math.floor((row.rank - hold) * 8.5)) / 100;
+        out.snap = math.min(55, (row.rank - hold) * 19) / 100;
     end
     if (rod.breakable) then
         local bpen = (not rod.legendary and fs > rs) and 2 or 0;
@@ -124,27 +198,29 @@ function fishing.rod(row, rod, lv)
         if (not rod.legendary and row.legendary) then
             bpen = 5;
         end
-        local over = row.rank - (rod.max + near + bbonus);
+        local over = row.rank - (rod.max + bbonus);
         if (over > 0) then
-            out.brk = math.min(55, math.floor((over + bpen) * 1.3)) / 100;
+            out.brk = math.min(20, (over + bpen) * 10) / 100;
         end
     end
     out.lose = out.lose / 100;
     out.risk = 1 - (1 - out.lose) * (1 - out.snap) * (1 - out.brk);
+    -- What's down to the rod (a loss for lack of skill is the same with any rod).
+    out.own = 1 - (1 - (out.why == 'skill' and 0 or out.lose)) * (1 - out.snap) * (1 - out.brk);
     return out;
 end
 
 -- Every rod with how it does (fishing.rod): the ones that hold it first, the plainest of those
 -- first (the least rod it needs), then the rest by how often they lose it.
-function fishing.rods_for(row, lv)
+function fishing.rods_for(row, sk)
     local out = { };
     for _, rod in ipairs(fishing.rods or { }) do
-        local r = fishing.rod(row, rod, lv);
+        local r = fishing.rod(row, rod, sk);
         r.rod = rod;
         out[#out + 1] = r;
     end
     table.sort(out, function (a, b)
-        if (a.risk ~= b.risk) then return a.risk < b.risk; end
+        if (a.own ~= b.own) then return a.own < b.own; end
         if (a.hook ~= b.hook) then return a.hook < b.hook; end
         if (a.rod.rating ~= b.rod.rating) then return a.rod.rating < b.rod.rating; end
         return a.rod.name < b.rod.name;
@@ -153,13 +229,16 @@ function fishing.rods_for(row, lv)
 end
 
 --[[
-* The chance a catch gives a skill-up at whole level `lv` (outside a town, an ordinary moon), and
-* the tenths one gives on average. 0 for an item, a fish at or under you, or one over 50 above.
+* The chance a catch gives at least one skill-up at whole level `lv` (outside a town) with
+* `rolls` rolls (a Pelican Ring's effect adds one), the tenths a skill-up gives on average, and
+* the skill-ups a catch gives on average. 0 for an item, a fish at or under you, or one over 50
+* above. (Phoenix's patch took out the moon's effect on skill-ups.)
 --]]
-function fishing.skillup(row, lv)
+function fishing.skillup(row, lv, rolls)
+    rolls = rolls or 1;
     local d = row.lv - lv;
     if (row.item or d <= 0 or d > fishing.REACH or lv >= fishing.CAP) then
-        return 0, 0;
+        return 0, 0, 0;
     end
     local norm = math.exp(-0.5 * math.log(2 * math.pi) - math.log(5) - (d - 11) ^ 2 / 50);
     local chance = math.max(4, math.floor(norm * 200) + math.floor((100 - lv) / 10) - math.floor(lv / 10));
@@ -170,23 +249,29 @@ function fishing.skillup(row, lv)
     -- A bonus, 1 in 8, is 1 to max - 1 more tenths (the server's roll leaves max out).
     local most = math.min(1 + math.floor(d / 5), 3);
     local gain = 1 + (most == 3 and 0.5 / 8 or 0);
-    return math.min(1, chance / roll), gain;
+    local p = math.min(1, chance / roll);
+    return 1 - (1 - p) ^ rolls, gain, p * rolls;
 end
 
--- The chance it gets away for lack of skill at whole level `lv` (fishingutils' lowSkillChance).
-function fishing.lose(row, lv)
+-- The chance it gets away for lack of skill at fishing skill `sk` (lowSkillChance, as Phoenix
+-- has it): 0.8% a level past 7 over you, and always when it's 50 or more over.
+function fishing.lose(row, sk)
     if (row.item) then
         return 0;
     end
-    local over = row.lv - (lv + fishing.LOSE_FROM);
-    return over > 0 and math.min(55, math.floor(over * 0.8)) / 100 or 0;
+    if (sk + fishing.REACH <= row.lv) then
+        return 1;
+    end
+    local over = row.lv - (sk + fishing.LOSE_FROM);
+    return over > 0 and math.floor(over * 0.8) / 100 or 0;
 end
 
 --[[
 * About how many catches from skill `tenths` to the next level and to where it stops (its level,
-* or your rank's cap first). nil where it gives no skill-ups.
+* or your rank's cap first), with `rolls` skill-up rolls a catch. nil where it gives no
+* skill-ups.
 --]]
-function fishing.catches(row, tenths, rank)
+function fishing.catches(row, tenths, rank, rolls)
     local cap = math.min(row.lv, (rank + 1) * 10, fishing.CAP) * 10;
     if (row.item or tenths >= cap) then
         return nil;
@@ -195,12 +280,12 @@ function fishing.catches(row, tenths, rank)
     local t = tenths;
     while (t < cap) do
         local lv = math.floor(t / 10);
-        local p, gain = fishing.skillup(row, lv);
-        if (p <= 0) then
+        local _, gain, ups = fishing.skillup(row, lv, rolls);
+        if (ups <= 0) then
             return nil;
         end
         local upto = math.min((lv + 1) * 10, cap);
-        total = total + (upto - t) / (p * gain);
+        total = total + (upto - t) / (ups * gain);
         t = upto;
         if (t == next_at) then
             nxt = total;
@@ -264,8 +349,9 @@ local SORTS = {
 * The rows the list shows: { f, up (skill-up chance a catch), band, today } for each fish that
 * passes the filters in `s` (fishsort, fishdir, fishups, fishitems, search, expansions).
 --]]
-function fishing.rows(s, lv, day)
-    local key = table.concat({ lv, s.fishsort, s.fishdir, s.fishups and 1 or 0, s.fishitems and 1 or 0, s.search or '',
+function fishing.rows(s, lv, day, rolls)
+    rolls = rolls or 1;
+    local key = table.concat({ lv, rolls, s.fishsort, s.fishdir, s.fishups and 1 or 0, s.fishitems and 1 or 0, s.search or '',
         s.expansions.COP and 1 or 0, s.expansions.TOAU and 1 or 0, day.count, day.day }, ',');
     if (fishing.cache.stamp == key) then
         return fishing.cache.rows;
@@ -273,7 +359,7 @@ function fishing.rows(s, lv, day)
     local out = { };
     local search = (s.search or ''):lower();
     for _, f in ipairs(fishing.list or { }) do
-        local up = fishing.skillup(f, lv);
+        local up = fishing.skillup(f, lv, rolls);
         if ((f.tag == nil or s.expansions[f.tag]) and (s.fishitems or not f.item) and (not s.fishups or up > 0)
             and (search == '' or f.name:lower():find(search, 1, true) ~= nil)) then
             out[#out + 1] = { f = f, up = up, band = fishing.band(f, lv), today = day.fish[tostring(f.id)] or 0 };

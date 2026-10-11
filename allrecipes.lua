@@ -29,7 +29,7 @@
 
 addon.name    = 'allrecipes';
 addon.author  = 'Relli';
-addon.version = '0.6';
+addon.version = '0.6.1';
 addon.desc    = 'Every era recipe by craft, with your odds, skill-ups, HQ rates and profit; a fishing atlas; and HELM.';
 addon.link    = 'https://github.com/relliko/allrecipes';
 
@@ -78,6 +78,8 @@ local defaults = T{
     fishups    = false,   -- only fish that give you skill-ups
     fishitems  = true,    -- list items (logs, buckets ...) as well as fish
     fishsel    = 0,       -- the fish shown
+    fishgear   = 'worn',  -- fishing skill from gear the numbers assume: 'none', 'full' (the best of it) or 'worn'
+    fishpelican = 0,      -- Pelican Ring effects counted (0-2): one more skill-up roll a catch each
     -- Today's catches (Japan's day, fishing.lua): days since 1970, how many, and how many of each.
     fishday    = T{ day = -1, count = 0, fish = T{ } },
     -- HELM (helm.lua): the zone shown on each tab (its id), the gear the numbers assume ('none',
@@ -141,6 +143,12 @@ local function fix(s)
         if (type(s.helmsel[k]) ~= 'number') then
             s.helmsel[k] = 0;
         end
+    end
+    if (s.fishgear ~= 'none' and s.fishgear ~= 'full' and s.fishgear ~= 'worn') then
+        s.fishgear = 'worn';
+    end
+    if (s.fishpelican ~= 0 and s.fishpelican ~= 1 and s.fishpelican ~= 2) then
+        s.fishpelican = 0;
     end
     if (s.helmgear ~= 'none' and s.helmgear ~= 'field' and s.helmgear ~= 'worker' and s.helmgear ~= 'worn') then
         s.helmgear = 'worn';
