@@ -18,6 +18,7 @@
 local helm = {
     kinds = nil,   -- [1..4] = { name, tool, relocate, respawn, camp, gear, zones }
     error = nil,
+    cache = { },   -- [kind] = { key, rows }: the zone list last worked out for each tab
 };
 
 helm.FIRST = 10;              -- the tabs: 10 harvesting, 11 excavation, 12 logging, 13 mining
@@ -57,7 +58,7 @@ function helm.load()
         end
         helm.kinds[k] = kind;
     end
-    helm.error = nil;
+    helm.error, helm.cache = nil, { };
     return true;
 end
 
@@ -110,8 +111,36 @@ function helm.worn(kind)
 end
 
 --[[
-* The rows the zone list shows for a kind: { z, items } for each zone that passes the filters (an
-* item searched for: zones that give it, with its chance a try as `find`), sorted as `s` says.
+* What a try is worth in a zone with nq and hq points of gear, at worth(id) gil for one of a drop
+* and tool gil for the tool (nil when it has no price): { gil = the drops' worth a try (each by
+* its chance; nil when none is priced), priced = drops with a price, drops, cost = the tool a try
+* (its break chance times its price; nil without one), net = gil less cost (gil when the tool has
+* no price), brk }. Drops are at their fresh chance: a daily cap or a pool running out isn't
+* counted, and the coloured rock is priced as Red Rock.
+--]]
+function helm.worth(zone, nq, hq, worth, tool)
+    local out = { priced = 0, drops = #zone.drops, brk = helm.break_with(zone, nq, hq) };
+    for _, d in ipairs(zone.drops) do
+        local v = worth(d.id);
+        if (v ~= nil) then
+            out.gil = (out.gil or 0) + helm.chance(zone, d) * v;
+            out.priced = out.priced + 1;
+        end
+    end
+    if (tool ~= nil) then
+        out.cost = out.brk * tool;
+    end
+    if (out.gil ~= nil) then
+        out.net = out.gil - (out.cost or 0);
+    end
+    return out;
+end
+
+--[[
+* The rows the zone list shows for a kind: { z, name, find, value } for each zone that passes the
+* filters (an item searched for: zones that give it, with its chance a try as `find`), sorted as
+* `s` says. value is helm.worth's with price = { worth, tool, nq, hq, stamp }; the rows are only
+* worked out again when the stamp or a filter changes.
 --]]
 local SORTS = {
     zone   = function (a) return a.name; end,
@@ -119,10 +148,17 @@ local SORTS = {
     brk    = function (a) return a.z.brk; end,
     points = function (a) return #a.z.points; end,
     find   = function (a) return a.find or 0; end,
+    gil    = function (a) return a.value.net or -math.huge; end,
 };
 
-function helm.rows(s, k, names, zone_name)
+function helm.rows(s, k, names, zone_name, price)
     local kind = helm.kinds[k];
+    local key = table.concat({ k, s.search or '', s.helmsort or 'zone', s.helmdir or 1, s.expansions.ROTZ and 1 or 0,
+        s.expansions.COP and 1 or 0, s.expansions.TOAU and 1 or 0, s.expansions.WOTG and 1 or 0,
+        price.nq, price.hq, tostring(price.tool), tostring(price.stamp) }, ',');
+    if (helm.cache[k] ~= nil and helm.cache[k].key == key) then
+        return helm.cache[k].rows;
+    end
     local search = (s.search or ''):lower();
     local out = { };
     for _, z in ipairs(kind.zones) do
@@ -137,7 +173,7 @@ function helm.rows(s, k, names, zone_name)
             end
             local name = zone_name(z.id);
             if (search == '' or find ~= nil or name:lower():find(search, 1, true) ~= nil) then
-                out[#out + 1] = { z = z, name = name, find = find };
+                out[#out + 1] = { z = z, name = name, find = find, value = helm.worth(z, price.nq, price.hq, price.worth, price.tool) };
             end
         end
     end
@@ -154,6 +190,7 @@ function helm.rows(s, k, names, zone_name)
         end
         return a.name < b.name;
     end);
+    helm.cache[k] = { key = key, rows = out };
     return out;
 end
 

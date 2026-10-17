@@ -17,11 +17,14 @@
 * the crystals in your inventory are counted at the top.
 *
 * The Fish tab is a fishing atlas (fishing.lua): every fish, the level to start it and the level
-* it stops giving skill-ups, where it bites and on what bait, and the fish you've caught today
-* (counted until midnight in Japan).
+* it stops giving skill-ups, where it bites and on what bait, what it sells for, and the fish
+* you've caught today and what they're worth (counted until midnight in Japan).
 *
 * The Harvest, Excavate, Log and Mine tabs (helm.lua) give each zone's drops and odds, with and
-* without gear, and its gathering points on the game's own map of the zone (zonemap.lua).
+* without gear, what a try makes after the tool's price, and its gathering points on the game's
+* own map of the zone (zonemap.lua).
+*
+* Fish and HELM drops share the recipes' prices: the ones you type, the AH history's and an NPC's.
 *
 * Nothing is ever sent to the server and nothing is asked of it: allrecipes only reads client
 * memory and the packets the game receives anyway.
@@ -29,7 +32,7 @@
 
 addon.name    = 'allrecipes';
 addon.author  = 'Relli';
-addon.version = '0.6.1';
+addon.version = '0.7';
 addon.desc    = 'Every era recipe by craft, with your odds, skill-ups, HQ rates and profit; a fishing atlas; and HELM.';
 addon.link    = 'https://github.com/relliko/allrecipes';
 
@@ -54,7 +57,7 @@ local defaults = T{
     craft      = 1,       -- the tab: 1 woodworking .. 8 cooking, 9 fishing, 10-13 harvesting, excavation, logging, mining
     desynth    = false,
     skillups   = false,   -- only recipes that can raise the craft
-    sell       = 'AH',    -- what the profit assumes: 'AH' or 'NPC'
+    sell       = 'AH',    -- what the profit and the Fish and HELM prices assume: 'AH' or 'NPC'
     expansions = T{ ROTZ = true, COP = true, TOAU = true, WOTG = false },
     sub        = true,    -- list recipes where the craft is only a sub-craft
     keyitems   = true,    -- list recipes that need a key item

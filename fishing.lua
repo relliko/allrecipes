@@ -342,17 +342,20 @@ local SORTS = {
     cap   = function (a) return a.lv; end,
     name  = function (a) return a.name; end,
     up    = function (a) return a.up; end,
+    gil   = function (a) return a.gil or -1; end,
     today = function (a) return a.today; end,
 };
 
 --[[
-* The rows the list shows: { f, up (skill-up chance a catch), band, today } for each fish that
-* passes the filters in `s` (fishsort, fishdir, fishups, fishitems, search, expansions).
+* The rows the list shows: { f, up (skill-up chance a catch), band, today, gil } for each fish
+* that passes the filters in `s` (fishsort, fishdir, fishups, fishitems, search, expansions).
+* gil is what one sells for (worth(id), nil when it isn't known); worth_stamp changes whenever
+* that could.
 --]]
-function fishing.rows(s, lv, day, rolls)
+function fishing.rows(s, lv, day, rolls, worth, worth_stamp)
     rolls = rolls or 1;
     local key = table.concat({ lv, rolls, s.fishsort, s.fishdir, s.fishups and 1 or 0, s.fishitems and 1 or 0, s.search or '',
-        s.expansions.COP and 1 or 0, s.expansions.TOAU and 1 or 0, day.count, day.day }, ',');
+        s.expansions.COP and 1 or 0, s.expansions.TOAU and 1 or 0, day.count, day.day, tostring(worth_stamp) }, ',');
     if (fishing.cache.stamp == key) then
         return fishing.cache.rows;
     end
@@ -362,7 +365,8 @@ function fishing.rows(s, lv, day, rolls)
         local up = fishing.skillup(f, lv, rolls);
         if ((f.tag == nil or s.expansions[f.tag]) and (s.fishitems or not f.item) and (not s.fishups or up > 0)
             and (search == '' or f.name:lower():find(search, 1, true) ~= nil)) then
-            out[#out + 1] = { f = f, up = up, band = fishing.band(f, lv), today = day.fish[tostring(f.id)] or 0 };
+            out[#out + 1] = { f = f, up = up, band = fishing.band(f, lv), today = day.fish[tostring(f.id)] or 0,
+                              gil = worth ~= nil and worth(f.id) or nil };
         end
     end
     local by, dir = SORTS[s.fishsort] or SORTS.cap, s.fishdir < 0 and -1 or 1;
@@ -390,6 +394,24 @@ end
 -- Seconds until the count starts over.
 function fishing.until_reset()
     return 86400 - (os.time() + fishing.JST) % 86400;
+end
+
+--[[
+* What the day's catches are worth at worth(id) gil each: the total, how many catches that
+* counts, and how many kinds caught today have no price.
+--]]
+function fishing.day_worth(day, worth)
+    local total, counted, unpriced = 0, 0, 0;
+    for k, n in pairs(day.fish or { }) do
+        local id = tonumber(k);
+        local v = id ~= nil and worth(id) or nil;
+        if (v ~= nil) then
+            total, counted = total + v * n, counted + n;
+        else
+            unpriced = unpriced + 1;
+        end
+    end
+    return total, counted, unpriced;
 end
 
 function fishing.roll(day)

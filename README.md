@@ -12,8 +12,8 @@ Every era synthesis and desynthesis recipe on PhoenixXI, by craft, for Ashita v4
 - Ctrl+click any item to open its page on ffxiah.com, and from there whichever wiki you like.
 - Your craft levels show to the tenth (22.4), worked out from your skill-up messages.
 - The crystals in your inventory are counted at the top of the window.
-- The **Fish** tab is a fishing atlas: every fish with the level to start it and the level it caps at, your skill-up chance, the bait it takes, where it bites, and how many fish you've caught today. See [Fishing atlas](#fishing-atlas).
-- The **Harvest**, **Excavate**, **Log** and **Mine** tabs cover HELM: every zone's drops and how often you get each, how often the tool breaks with and without Field or Worker gear, and its gathering points on the game's own map of the zone. See [HELM](#helm).
+- The **Fish** tab is a fishing atlas: every fish with the level to start it and the level it caps at, your skill-up chance, the bait it takes, where it bites, what it sells for, and how many fish you've caught today and what they're worth. See [Fishing atlas](#fishing-atlas).
+- The **Harvest**, **Excavate**, **Log** and **Mine** tabs cover HELM: every zone's drops and how often you get each, how often the tool breaks with and without Field or Worker gear, what a try makes after the tool's price, and its gathering points on the game's own map of the zone. See [HELM](#helm).
 
 Nothing is ever sent to the server and nothing is asked of it: allrecipes only reads client memory, the game's files and the packets the game receives anyway. (To sort HELM points onto a zone's floors it also asks the game which floor a spot is on, which happens inside your client.) Phoenix only allows tools on its [approved addon list](https://phoenix-xi.com/approved-addons), so check it's there before using it on the server.
 
@@ -63,11 +63,12 @@ Pick a fish to see:
 - your skill-up chance on each catch, and how many catches it takes on average to reach your next level and the fish's cap;
 - the rods that hold it, plainest first, and what goes wrong with the ones that don't: the line snaps, the rod breaks, or the fish is too big or too small for the rod and gets away. These follow Phoenix's own fishing rules, from the fishing patch in its repo. They use each fish's strength, each rod's ranks (with Phoenix's own changes to them) and your fishing skill with gear. A large-fish rod lets a small fish go often, more so the higher the fish's level, and a rod of the wrong size gets fewer bites either way;
 - the bait and lures it takes, and how well (best, good or bites);
-- **yours** beside any rod or bait in your inventory.
-
-Hover a fish in the list to see the least rod it needs and its best bait.
+- **yours** beside any rod or bait in your inventory;
 - every zone and spot where it bites;
-- whether it's a large fish, needs a key item, or is legendary.
+- whether it's a large fish, needs a key item, or is legendary;
+- its **price**: a box for what it sells for on the AH, and what an NPC pays. See [Fish prices](#fish-prices).
+
+Hover a fish in the list to see the least rod it needs, its best bait and its prices.
 
 The chance shown is for fishing outside a town; in a town skill-ups are rarer. On Phoenix the moon doesn't change them. Under level 50, a Lu Shang's Fishing Rod makes them rarer.
 
@@ -75,21 +76,30 @@ The chance shown is for fishing outside a town; in a town skill-ups are rarer. O
 
 **Caught today**, at the top right, counts your own "caught" lines. The count starts over at midnight in Japan (15:00 UTC), when the game's daily limits reset, and the list's **Today** column shows how many of each fish you've caught. Fish you couldn't carry and monsters don't count. Catches made while the addon isn't loaded can't be counted. The count is kept for each character.
 
-The fish come from Phoenix's fishing tables. To update them:
+### Fish prices
+The **sell on AH** and **sell to NPC** chips pick which price the tab shows. It's the same choice as on the craft tabs, so switching here switches there too.
+- **On the AH:** the price you type in the fish's box, or else the AH history's (see [AH price history](#ah-price-history)): look at a fish's price history at the auction house and it's kept. A price from the history shows with a `~`. Like any price, one typed here is used by every recipe and every character.
+- **To an NPC:** what a shop pays before fame, for every fish and fished-up item.
+- The list's **AH** (or **NPC**) column shows what one sells for; click its head to sort by it.
+- The fish's page shows what a stack and today's catches of it come to.
+- Under **caught today**, the day's catches are added up at those prices. A `+` after the total means some kinds caught today have no price yet; hover it to see how many.
+
+The fish come from Phoenix's fishing tables. To update them (then run `gen_recipes.py`, so the new fish get NPC prices):
 
     python tools/gen_fish.py --phoenix C:\code\Phoenix
 
 ## HELM
 One tab each for harvesting, excavation, logging and mining. The zones come from Phoenix's HELM table, which has measured rates and retail-captured point positions (`scripts/globals/hobbies/helm`). Drops that Phoenix's era module takes out (added in WotG or later) are left out here too.
 
-The list shows each zone's chance a try of finding something, of breaking the tool, and how many spots its points move between. Type an item in the search box to list only the zones that give it, with its chance a try.
+The list shows each zone's chance a try of finding something, of breaking the tool, how many spots its points move between, and what a try makes (see **What it makes** below). Click the last column's head to sort the zones by it. Type an item in the search box to list only the zones that give it, with its chance a try.
 
 Pick a zone to see:
 - **The odds:** how often a try finds something and how often the tool breaks. The table under them shows the break chance, tries a tool and finds a tool with no gear, the Field set, the Worker set and what you have on. Gear only changes how often the tool breaks: each Field piece (NQ) makes it break x0.893 as often and each Worker piece (HQ) x0.843. Three pieces of each set help each of harvesting, logging and mining, and nothing helps excavation. The chips above the list pick which gear the list and the drop table assume.
-- **What it gives:** each drop's chance a try, and how many you get on average from one tool with no gear and with the gear picked. With prices typed in or AH history, it also works out what a try and a tool are worth. Drops with a daily cap or that run out until you zone are marked, and the coloured rock is the day's.
+- **What it gives:** each drop's chance a try, and how many you get on average from one tool with no gear and with the gear picked. Drops with a daily cap or that run out until you zone are marked, and the coloured rock is the day's.
+- **What it makes:** each drop's price, with a box for what it sells for on the AH (your price, or else the AH history's) and what an NPC pays, and what it's worth a try at its chance. The tool has a price box too: what you pay for one. A try makes the drops' worth less the tool's price times how often it breaks, with the gear picked; under it, what a whole tool makes after its own price. The **sell on AH** and **sell to NPC** chips pick which drop prices count (the tool's is always what you pay). A drop with a daily cap or that runs out is counted at its fresh chance, and the coloured rock at Red Rock's price. In the list the number is faint when some of a zone's drops have no price yet; hover it to see how it adds up.
 - **Where the points are:** the game's own map of the zone, read from your game files, with the spots the points move between. A point stands at one spot at a time and moves after some finds. When you're in the zone, a gold dot shows where you are. In a zone with several floors, the game can only say which floor a spot is on while you're in that zone; once you've been there, the spots sort onto their floors and stay sorted (kept in `config/addons/allrecipes/floors.lua`). Until then they show hollow on every floor.
 
-The data comes from Phoenix and the game:
+The data comes from Phoenix and the game (run `gen_recipes.py` after `gen_helm.py`, so new drops get NPC prices):
 
     python tools/gen_helm.py --phoenix C:\code\Phoenix
     python tools/gen_maps.py --dump C:\Games\PhoenixXI\FFXiMain_04490000.bin
@@ -175,4 +185,4 @@ JSON for import can be either:
 - an object: `{"4098": 90, "710": 1100}`;
 - an array: `[{"id": 4098, "price": 90}]`. `itemId` or `item_id` work in place of `id`, and `value` in place of `price`.
 
-NPC prices are what a shop pays before fame, from Phoenix's item table (BaseSell) with its own module's changes (the pre-RMT reverts) applied. Stack sizes are Phoenix's too.
+NPC prices are what a shop pays before fame, from Phoenix's item table (BaseSell) with its own module's changes (the pre-RMT reverts) applied, for every item in a recipe, every fish and every HELM drop. Stack sizes are Phoenix's too.

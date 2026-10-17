@@ -79,6 +79,21 @@ function model.name(id)
     return n;
 end
 
+--[[
+* What one of an item sells for: on the AH ('AH') your price or else the AH history's, or what an
+* NPC pays ('NPC', 0 when shops won't buy it). nil when it isn't known.
+--]]
+function model.worth(id, mode)
+    if (mode == 'NPC') then
+        local v = model.npc[id];
+        if (v == false) then
+            return 0;
+        end
+        return v;
+    end
+    return prices.view[id];
+end
+
 -- What the list calls a recipe: what it makes (with how many), or the item it breaks up.
 function model.title(r)
     if (r[2] == 1) then

@@ -803,9 +803,9 @@ local function legend(s)
 end
 
 --[[
-* The fishing atlas (fishing.lua): your fishing level and today's catches, the fish with the
-* level to start each and the level it stops giving skill-ups, and the one picked: your odds on
-* it, the bait it takes and where it bites.
+* The fishing atlas (fishing.lua): your fishing level and today's catches (and what they're
+* worth), the fish with the level to start each, the level it stops giving skill-ups and what it
+* sells for, and the one picked: your odds on it, its price, the bait it takes and where it bites.
 --]]
 local FISH_LEGEND = { { 'safe', 'at or under you' }, { 'good', 'skill-ups, 1-20 over' }, { 'risky', '21-35 over' },
                       { 'hard', '36-50 over' }, { 'zero', 'over 50' }, { 'cant', 'item' } };
@@ -813,6 +813,28 @@ local POWER = { 'bites', 'good', 'best' };
 
 local function hm(secs)
     return ('%dh %02dm'):fmt(math.floor(secs / 3600), math.floor(secs % 3600 / 60));
+end
+
+-- An amount of gil in short, unsigned: 210, 1.2k, 35k.
+local function short(n)
+    return (model.short(n):gsub('^%+', ''));
+end
+
+-- What one of an item sells for, the way the toolbar says to sell (model.worth).
+local function worth_fn(s)
+    local mode = s.sell;
+    return function (id) return model.worth(id, mode); end;
+end
+
+-- What today's catches are worth, worked out again only when a catch or a price changes.
+local day_worth = { key = nil };
+local function today_worth(s, day)
+    local key = ('%d:%d:%d:%s'):fmt(day.day, day.count, prices.version, s.sell);
+    if (day_worth.key ~= key) then
+        day_worth.key = key;
+        day_worth.total, day_worth.counted, day_worth.unpriced = fishing.day_worth(day, worth_fn(s));
+    end
+    return day_worth.total, day_worth.counted, day_worth.unpriced;
 end
 
 function ui.fish_header(s, you)
@@ -866,8 +888,19 @@ function ui.fish_header(s, you)
     local count = tostring(day.count);
     local reset = ('resets in %s'):fmt(hm(fishing.until_reset()));
     local why = ('Your catches since midnight in Japan (15:00 UTC), when the game\'s\ndaily limits start over too. Counted from your "caught" lines while\nthe addon is loaded; fish you let go or couldn\'t carry don\'t count.\nNext reset in %s.'):fmt(hm(fishing.until_reset()));
+    -- What they're worth, selling as the toolbar says.
+    local total, counted, unpriced = today_worth(s, day);
+    local worth = nil;
+    if (counted > 0) then
+        worth = ('worth %s%s'):fmt(model.gil(total), unpriced > 0 and '+' or '');
+        why = why .. ('\n\nWorth %s gil %s: %s.'):fmt(model.gil(total), s.sell == 'AH' and 'on the AH' or 'to an NPC',
+            s.sell == 'AH' and 'your prices, or else the AH history\'s' or 'what a shop pays, before fame');
+    end
+    if (unpriced > 0) then
+        why = why .. ('\n%d kind%s caught today %s no price yet.'):fmt(unpriced, unpriced == 1 and '' or 's', unpriced == 1 and 'has' or 'have');
+    end
     local cw = imgui.CalcTextSize(count) * 30 / math.max(imgui.GetFontSize(), 1);
-    local lw = math.max(imgui.CalcTextSize('caught today'), imgui.CalcTextSize(reset));
+    local lw = math.max(imgui.CalcTextSize('caught today'), imgui.CalcTextSize(reset), worth ~= nil and imgui.CalcTextSize(worth) or 0);
     local x = right - cw - 8 - lw;
     if (x >= group_right + 16) then
         imgui.SetCursorScreenPos({ x, top });
@@ -876,6 +909,9 @@ function ui.fish_header(s, you)
         imgui.SameLine(0, 8);
         imgui.BeginGroup();
         imgui.TextColored(style.f('text'), 'caught today');
+        if (worth ~= nil) then
+            imgui.TextColored(style.f('hq'), worth);
+        end
         dim(reset);
         imgui.EndGroup();
         imgui.EndGroup();
@@ -884,7 +920,7 @@ function ui.fish_header(s, you)
         end
         imgui.SetCursorScreenPos({ back_x, back_y });
     else
-        dim(('%d caught today, %s'):fmt(day.count, reset));
+        dim(('%d caught today%s, %s'):fmt(day.count, worth ~= nil and (', ' .. worth) or '', reset));
         if (imgui.IsItemHovered()) then
             imgui.SetTooltip(why);
         end
@@ -901,6 +937,8 @@ local function fish_toolbar(s)
     if (imgui.IsItemHovered()) then
         imgui.SetTooltip('List what isn\'t a fish too (logs, buckets, kelp...). They never give skill-ups.');
     end
+    if (chip('##ar_fah', 'sell on AH', s.sell == 'AH', nil, 16)) then s.sell, ui.dirty = 'AH', true; end
+    if (chip('##ar_fnpc', 'sell to NPC', s.sell == 'NPC')) then s.sell, ui.dirty = 'NPC', true; end
     imgui.SameLine(0, 16);
     imgui.PushItemWidth(150);
     ui.search[1] = ui.search[1] or '';
@@ -962,13 +1000,19 @@ local function fish_gear(f, sk)
         end
     end
     lines[#lines + 1] = #bait > 0 and ('Bait: %s'):fmt(table.concat(bait, ', ')) or 'Bait: none listed';
+    if (f.id < 65535) then
+        local v, npc = prices.view[f.id], model.npc[f.id];
+        lines[#lines + 1] = ('AH %s, NPC %s'):fmt(v == nil and '?' or ((prices.get(f.id) == nil and '~' or '') .. model.gil(v)),
+            npc == false and 'won\'t buy' or npc == nil and '?' or model.gil(npc));
+    end
     return table.concat(lines, '\n');
 end
 
 local function fish_list(s, rows, width, height, sk)
     local today_r = width - 24;
-    local up_r = today_r - 56;
-    local tag_x = up_r - 50 - 84;
+    local gil_r = today_r - 52;
+    local up_r = gil_r - 52;
+    local tag_x = up_r - 46 - 84;
     local function head(label, key, x, right, first, tip)
         local on = s.fishsort == key;
         local shown = on and (label .. (s.fishdir > 0 and ' ^' or ' v')) or label;
@@ -986,7 +1030,7 @@ local function fish_list(s, rows, width, height, sk)
             if (on) then
                 s.fishdir = -s.fishdir;
             else
-                s.fishsort, s.fishdir = key, (key == 'up' or key == 'today') and -1 or 1;
+                s.fishsort, s.fishdir = key, (key == 'up' or key == 'today' or key == 'gil') and -1 or 1;
             end
             ui.dirty = true;
         end
@@ -995,6 +1039,9 @@ local function fish_list(s, rows, width, height, sk)
     head('Cap', 'cap', 52, false, false, 'Its skill level: no more skill-ups from it once you reach it.');
     head('Fish', 'name', 88);
     head('Up', 'up', up_r, true, false, 'Your skill-up chance a catch, outside a town (with the Pelican Ring set above).');
+    head(s.sell == 'AH' and 'AH' or 'NPC', 'gil', gil_r, true, false, s.sell == 'AH'
+        and 'What one sells for on the AH: your price, or else the AH history\'s (~).\nPick a fish to type a price.'
+        or 'What an NPC shop pays for one, before fame.');
     head('Today', 'today', today_r, true, false, 'How many you\'ve caught today (Japan\'s day).');
 
     imgui.BeginChild('ar_flist', { width, height }, ImGuiChildFlags_Borders);
@@ -1046,6 +1093,12 @@ local function fish_list(s, rows, width, height, sk)
         if (f.legendary) then tag('LGD', 'warn'); end
         if (f.ki ~= 0 or f.quest) then tag('KI', 'warn'); end
         rtext(up_r, style.col('good'), row.up > 0 and model.pct(row.up) or '-');
+        if (row.gil ~= nil) then
+            local guess = s.sell == 'AH' and prices.get(f.id) == nil;
+            rtext(gil_r, style.col('text', guess and 190 or 255), (guess and '~' or '') .. short(row.gil));
+        else
+            rtext(gil_r, style.col('dim', 160), '-');
+        end
         rtext(today_r, style.col(row.today > 0 and 'text' or 'dim', row.today > 0 and 255 or 160), row.today > 0 and tostring(row.today) or '-');
     end
     imgui.SetCursorPosY(top + #rows * rowh);
@@ -1146,6 +1199,39 @@ local function fish_detail(s, you, f, g)
         imgui.TextColored(style.f('good'), ('%d caught today'):fmt(today));
     end
 
+    -- What it sells for: your AH price (or the AH history's) and an NPC's.
+    if (f.id < 65535) then
+        imgui.SeparatorText('Price');
+        dim('AH each');
+        imgui.SameLine(0, 8);
+        price_box('f' .. f.id, f.id, 76);
+        imgui.SameLine(0, 16);
+        dim('NPC each');
+        imgui.SameLine(0, 8);
+        local npc = model.npc[f.id];
+        imgui.TextColored(style.f(npc and 'text' or 'dim'), npc == false and 'won\'t buy' or npc == nil and '?' or model.gil(npc));
+        local each = model.worth(f.id, s.sell);
+        local parts = { };
+        local size = ah.stack_size(f.id);
+        if (each ~= nil and size > 1) then
+            parts[#parts + 1] = ('a stack of %d %s'):fmt(size, model.gil(each * size));
+        end
+        if (each ~= nil and today > 0) then
+            parts[#parts + 1] = ('today\'s %d %s'):fmt(today, model.gil(each * today));
+        end
+        if (#parts > 0) then
+            local text = table.concat(parts, ', ');
+            dim(('%s%s %s.'):fmt(text:sub(1, 1):upper(), text:sub(2), s.sell == 'AH' and 'on the AH' or 'to an NPC'));
+        end
+        imgui.PushTextWrapPos(0);
+        if (s.sell == 'AH' and each == nil) then
+            dim('No AH price yet: look at its price history at the auction house and it\'s kept, or type one.');
+        elseif (s.sell == 'AH' and prices.get(f.id) == nil) then
+            dim('~ from the AH history; type your own to use that instead.');
+        end
+        imgui.PopTextWrapPos();
+    end
+
     -- The rods: the ones that hold it first, then the trouble with the rest.
     local bag = player.inventory(os.clock());
     local w = imgui.GetContentRegionAvail();
@@ -1237,7 +1323,7 @@ local function fish_body(s, you)
     imgui.Spacing();
     local g = fishing.setup(s);
     local lv = you.level[fishing.SKILL];
-    local rows = fishing.rows(s, lv, s.fishday, g.rolls);
+    local rows = fishing.rows(s, lv, s.fishday, g.rolls, worth_fn(s), ('%d:%s'):fmt(prices.version, s.sell));
     local selected = nil;
     for _, row in ipairs(rows) do
         if (row.f.id == s.fishsel) then
@@ -1252,7 +1338,7 @@ local function fish_body(s, you)
     local aw, ah = imgui.GetContentRegionAvail();
     local foot = imgui.GetTextLineHeightWithSpacing() + 6;
     local head = imgui.GetTextLineHeightWithSpacing();
-    local lw = math.min(450, math.floor(aw * 0.55));
+    local lw = math.min(480, math.floor(aw * 0.55));
     local bodyh = math.max(80, ah - foot - head);
     imgui.BeginGroup();
     fish_list(s, rows, lw, bodyh, lv + g.bonus);
@@ -1268,8 +1354,8 @@ end
 
 --[[
 * HELM (helm.lua): a tab each for harvesting, excavation, logging and mining. The zones with their
-* odds; the one picked with its drops a try and a tool, with and without gear, and its points
-* on the game's map of the zone (zonemap.lua).
+* odds and what a try makes; the one picked with its drops a try and a tool, with and without
+* gear, their prices, and its points on the game's map of the zone (zonemap.lua).
 --]]
 local GEAR_CHOICES = { { 'none', 'no gear' }, { 'field', 'Field set' }, { 'worker', 'Worker set' }, { 'worn', 'what you wear' } };
 
@@ -1354,7 +1440,13 @@ local function helm_toolbar(s, kind)
         dim('no gear for excavation');
         first = false;
     end
+    if (chip('##ar_hah', 'sell on AH', s.sell == 'AH', nil, 16)) then s.sell, ui.dirty = 'AH', true; end
+    if (chip('##ar_hnpc', 'sell to NPC', s.sell == 'NPC')) then s.sell, ui.dirty = 'NPC', true; end
     imgui.SameLine(0, 16);
+    -- The search box and settings go under the chips when they don't fit beside them.
+    if (imgui.GetContentRegionAvail() < 170 + 90) then
+        imgui.NewLine();
+    end
     imgui.PushItemWidth(170);
     ui.search[1] = ui.search[1] or '';
     if (imgui.InputTextWithHint('##ar_hsearch', 'search items or zones', ui.search, 48)) then
@@ -1364,11 +1456,26 @@ local function helm_toolbar(s, kind)
     if (chip('##ar_cfg', 'settings', s.cfg, nil, 8)) then s.cfg, ui.dirty = not s.cfg, true; end
 end
 
-local function helm_list(s, kind, rows, width, height, nq, hq)
-    local pts_r = width - 24;
-    local brk_r = pts_r - 44;
-    local ob_r = brk_r - 58;
-    local find_r = ob_r - 58;
+-- How a zone's worth a try adds up (helm.worth), for its row's tooltip.
+local function helm_worth_tip(s, kind, z, v, label)
+    local tool = model.name(kind.tool):lower();
+    local lines = { ('%s, a try %s:'):fmt(zone_name(z.id), s.sell == 'AH' and 'selling on the AH' or 'selling to an NPC') };
+    lines[#lines + 1] = ('Drops: %s (%d of %d priced)'):fmt(about(v.gil), v.priced, v.drops);
+    if (v.cost ~= nil) then
+        lines[#lines + 1] = ('The %s: -%s (breaks %s of tries with %s)'):fmt(tool, about(v.cost), model.pct(v.brk), label);
+    else
+        lines[#lines + 1] = ('The %s has no price, so it isn\'t taken off.'):fmt(tool);
+    end
+    lines[#lines + 1] = ('A try: %s; a %s: %s'):fmt(model.gil(v.net, true), tool, model.gil(v.net / math.max(v.brk, 1e-6), true));
+    return table.concat(lines, '\n');
+end
+
+local function helm_list(s, kind, rows, width, height, nq, hq, label)
+    local gil_r = width - 24;
+    local pts_r = gil_r - 46;
+    local brk_r = pts_r - 40;
+    local ob_r = brk_r - 54;
+    local find_r = ob_r - 54;
     local searching = (s.search or '') ~= '';
     local function head(label, key, x, right, first_, tip)
         local on = (s.helmsort or 'zone') == key;
@@ -1399,6 +1506,8 @@ local function helm_list(s, kind, rows, width, height, nq, hq)
     head('Finds', 'obtain', ob_r, true, false, 'How often a try finds something.');
     head('Breaks', 'brk', brk_r, true, false, 'How often a try breaks the tool, with the gear picked above.');
     head('Pts', 'points', pts_r, true, false, 'How many spots its points move between.');
+    head(s.sell == 'AH' and 'AH' or 'NPC', 'gil', gil_r, true, false, ('What a try makes %s: its drops at their chances, less the\n%s\'s price for how often it breaks (with the gear picked above).\nFaint where some drops have no price. Pick a zone to type prices.'):fmt(
+        s.sell == 'AH' and 'selling on the AH' or 'selling to an NPC', model.name(kind.tool):lower()));
 
     imgui.BeginChild('ar_hlist', { width, height }, ImGuiChildFlags_Borders);
     if (ui.scroll_top) then
@@ -1409,11 +1518,15 @@ local function helm_list(s, kind, rows, width, height, nq, hq)
         dim(searching and 'No zone gives that.' or 'No zones.');
     end
     local dl = imgui.GetWindowDrawList();
+    local mx = imgui.GetMousePos();
     for _, row in ipairs(rows) do
         local z = row.z;
         local x0, y0 = imgui.GetCursorScreenPos();
         if (imgui.Selectable(('##arh%d'):fmt(z.id), ui.hsel == z.id)) then
             ui.hpick = z.id;
+        end
+        if (imgui.IsItemHovered() and mx >= x0 + pts_r + 4 and row.value.net ~= nil) then
+            imgui.SetTooltip(helm_worth_tip(s, kind, z, row.value, label));
         end
         local function text(x, col, t)
             dl:AddText({ x0 + x, y0 }, col, t);
@@ -1439,6 +1552,12 @@ local function helm_list(s, kind, rows, width, height, nq, hq)
         rtext(ob_r, style.col('text'), model.pct(z.obtain));
         rtext(brk_r, style.col('bad'), model.pct(helm.break_with(z, nq, hq)));
         rtext(pts_r, style.col('dim'), tostring(#z.points));
+        local v = row.value;
+        if (v.net ~= nil) then
+            rtext(gil_r, style.col(v.net >= 0 and 'good' or 'bad', v.priced < v.drops and 150 or 255), model.short(v.net));
+        else
+            rtext(gil_r, style.col('dim', 160), '-');
+        end
     end
     imgui.EndChild();
 end
@@ -1602,7 +1721,6 @@ local function helm_detail(s, kind, z, nq, hq, label)
         right_text(tool_r, 'accent', 'with gear');
     end
     local b0 = z.brk;
-    local worth, priced = 0, 0;
     for _, d in ipairs(z.drops) do
         local c = helm.chance(z, d);
         local name = model.name(d.id);
@@ -1626,14 +1744,6 @@ local function helm_detail(s, kind, z, nq, hq, label)
         if (#kind.gear > 0 and (nq > 0 or hq > 0)) then
             right_text(tool_r, 'accent', per(c / math.max(b, 1e-6)));
         end
-        local v = prices.view[d.id];
-        if (v ~= nil) then
-            worth, priced = worth + c * v, priced + 1;
-        end
-    end
-    if (priced > 0) then
-        dim(('Worth about %s gil a try, %s a %s with %s (%d of %d drops priced).'):fmt(model.gil(worth), model.gil(worth / math.max(b, 1e-6)),
-            tool:lower(), label, priced, #z.drops));
     end
     imgui.PushTextWrapPos(0);
     for _, d in ipairs(z.drops) do
@@ -1655,6 +1765,75 @@ local function helm_detail(s, kind, z, nq, hq, label)
         kind.relocate, kind.respawn, kind.camp));
     imgui.PopTextWrapPos();
 
+    -- What a try makes: each drop's price (yours, the AH history's or an NPC's) at its chance,
+    -- less the tool's price for how often it breaks.
+    imgui.SeparatorText(s.sell == 'AH' and 'What it makes, selling on the AH' or 'What it makes, selling to an NPC');
+    local w2 = imgui.GetContentRegionAvail();
+    local val_r = w2;
+    local box_x = val_r - 64 - 76;
+    local npc_r = box_x - 10;
+    local name_w = npc_r - 64;
+    dim('');
+    right_text(npc_r, 'dim', 'NPC each');
+    imgui.SameLine(box_x);
+    dim('AH each');
+    right_text(val_r, 'dim', 'a try');
+    local v = helm.worth(z, nq, hq, worth_fn(s), prices.view[kind.tool]);
+    local history, unpriced = false, { };
+    for _, d in ipairs(z.drops) do
+        link(d.id, fit(d.id == helm.RED_ROCK and 'Coloured rock (as Red Rock)' or model.name(d.id), name_w));
+        local npc = model.npc[d.id];
+        right_text(npc_r, npc and 'text' or 'dim', npc == false and 'won\'t buy' or npc == nil and '?' or model.gil(npc));
+        imgui.SameLine(box_x);
+        price_box('h' .. d.id, d.id, 76);
+        local each = model.worth(d.id, s.sell);
+        right_text(val_r, each ~= nil and 'text' or 'dim', each ~= nil and about(helm.chance(z, d) * each) or '?');
+        if (each == nil) then
+            unpriced[#unpriced + 1] = model.name(d.id);
+        elseif (s.sell == 'AH' and prices.get(d.id) == nil) then
+            history = true;
+        end
+    end
+    link(kind.tool, fit(('%s (the tool)'):fmt(tool), name_w), 'dim');
+    imgui.SameLine(box_x);
+    price_box('ht' .. kind.tool, kind.tool, 76);
+    right_text(val_r, v.cost ~= nil and 'bad' or 'dim', v.cost ~= nil and ('-' .. about(v.cost)) or '?');
+    if (v.cost ~= nil and prices.get(kind.tool) == nil) then
+        history = true;
+    end
+    if (v.net ~= nil) then
+        imgui.TextColored(style.f('accent'), 'A try at these odds');
+        local text = model.gil(v.net, true);
+        local tw = imgui.CalcTextSize(text) * 20 / math.max(imgui.GetFontSize(), 1);
+        imgui.SameLine(val_r - tw);
+        style.big(text, style.col(gil_key(v.net)), 20);
+    end
+    imgui.PushTextWrapPos(0);
+    if (v.gil ~= nil) then
+        local tries = 1 / math.max(v.brk, 1e-6);
+        if (v.cost ~= nil) then
+            dim(('The drops make %s a try, less %s for the %s (it breaks %s of tries at %s). A %s lasts %s tries with %s: %s after its own price.'):fmt(
+                about(v.gil), about(v.cost), tool:lower(), model.pct(v.brk), model.gil(prices.view[kind.tool]), tool:lower(), per(tries), label,
+                model.gil(v.net * tries, true)));
+        else
+            dim(('The drops make %s a try, %s a %s (%s tries with %s). Type the %s\'s price to take it off.'):fmt(
+                about(v.gil), model.gil(v.gil * tries), tool:lower(), per(tries), label, tool:lower()));
+        end
+    end
+    if (#unpriced > 0) then
+        imgui.TextColored(style.f('warn'), (v.gil == nil and 'Type a price for: %s' or 'Not counted (no price): %s'):fmt(table.concat(unpriced, ', ')));
+    end
+    if (history) then
+        dim('~ prices are from the AH history; type your own to use those instead.');
+    end
+    for _, d in ipairs(z.drops) do
+        if (d.cap > 0 or d.pool) then
+            dim('Drops with a daily cap or that run out are counted at their fresh chance.');
+            break;
+        end
+    end
+    imgui.PopTextWrapPos();
+
     imgui.SeparatorText('Where the points are');
     helm_map(s, z, imgui.GetContentRegionAvail());
 end
@@ -1668,7 +1847,8 @@ local function helm_body(s, you, k)
     helm_toolbar(s, kind);
     imgui.Spacing();
     local nq, hq, label = gear_points(s, kind);
-    local rows = helm.rows(s, k, model.name, zone_name);
+    local rows = helm.rows(s, k, model.name, zone_name, { worth = worth_fn(s), tool = prices.view[kind.tool], nq = nq, hq = hq,
+        stamp = ('%d:%s'):fmt(prices.version, s.sell) });
     local sel = nil;
     for _, row in ipairs(rows) do
         if (row.z.id == s.helmsel[k]) then
@@ -1682,10 +1862,10 @@ local function helm_body(s, you, k)
     ui.hsel, ui.hpick = sel ~= nil and sel.id or nil, nil;
     local aw, ah = imgui.GetContentRegionAvail();
     local head = imgui.GetTextLineHeightWithSpacing();
-    local lw = math.min(400, math.floor(aw * 0.42));
+    local lw = math.min(440, math.floor(aw * 0.46));
     local bodyh = math.max(80, ah - head - 4);
     imgui.BeginGroup();
-    helm_list(s, kind, rows, lw, bodyh, nq, hq);
+    helm_list(s, kind, rows, lw, bodyh, nq, hq, label);
     imgui.EndGroup();
     if (ui.hpick ~= nil and ui.hpick ~= s.helmsel[k]) then
         s.helmsel[k], s.helmfloor, ui.dirty = ui.hpick, -1, true;
