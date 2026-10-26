@@ -24,7 +24,12 @@
 * without gear, what a try makes after the tool's price, and its gathering points on the game's
 * own map of the zone (zonemap.lua).
 *
-* Fish and HELM drops share the recipes' prices: the ones you type, the AH history's and an NPC's.
+* The Chests tab (chests.lua) gives every treasure chest and coffer: its level and key, the odds
+* with thief's tools and living and skeleton keys, the map and quest key items it gives, what it
+* gives and the gil for your party, what an opening makes after the key, and its spots on the map.
+*
+* Fish, HELM drops and chest loot share the recipes' prices: the ones you type, the AH history's
+* and an NPC's.
 *
 * Nothing is ever sent to the server and nothing is asked of it: allrecipes only reads client
 * memory and the packets the game receives anyway.
@@ -32,8 +37,8 @@
 
 addon.name    = 'allrecipes';
 addon.author  = 'Relli';
-addon.version = '0.7';
-addon.desc    = 'Every era recipe by craft, with your odds, skill-ups, HQ rates and profit; a fishing atlas; and HELM.';
+addon.version = '0.8';
+addon.desc    = 'Every era recipe by craft, with your odds, skill-ups, HQ rates and profit; a fishing atlas; HELM; and treasure chests.';
 addon.link    = 'https://github.com/relliko/allrecipes';
 
 require('common');
@@ -48,13 +53,14 @@ local tray     = require('tray');
 local skill    = require('skill');
 local fishing  = require('fishing');
 local helm     = require('helm');
+local chests   = require('chests');
 local zonemap  = require('zonemap');
 
 local defaults = T{
     visible    = false,
     minimized  = false,   -- shown as an icon at the bottom right instead
     x = 120, y = 120, w = 900, h = 560,
-    craft      = 1,       -- the tab: 1 woodworking .. 8 cooking, 9 fishing, 10-13 harvesting, excavation, logging, mining
+    craft      = 1,       -- the tab: 1 woodworking .. 8 cooking, 9 fishing, 10-13 harvesting, excavation, logging, mining, 14 chests
     desynth    = false,
     skillups   = false,   -- only recipes that can raise the craft
     sell       = 'AH',    -- what the profit and the Fish and HELM prices assume: 'AH' or 'NPC'
@@ -92,6 +98,14 @@ local defaults = T{
     helmsort   = 'zone',
     helmdir    = 1,
     helmfloor  = -1,      -- -1: the zone's first map
+    -- Chests (chests.lua): the box shown (zone id x 10 + 1 chest, 2 coffer), the list's sort, the
+    -- map's floor, and the party the gil is worked out for (players in the zone, trusts).
+    chestsel   = 0,
+    chestsort  = 'zone',
+    chestdir   = 1,
+    chestfloor = -1,
+    chestplayers = 1,
+    chesttrusts  = 0,
 };
 
 local ar = { settings = nil };
@@ -132,7 +146,7 @@ local function fix(s)
             end
         end
     end
-    if (type(s.craft) ~= 'number' or s.craft < 1 or s.craft > 13) then
+    if (type(s.craft) ~= 'number' or s.craft < 1 or s.craft > 14) then
         s.craft = 1;
     end
     local day = s.fishday;
@@ -156,6 +170,15 @@ local function fix(s)
     if (s.helmgear ~= 'none' and s.helmgear ~= 'field' and s.helmgear ~= 'worker' and s.helmgear ~= 'worn') then
         s.helmgear = 'worn';
     end
+    if (type(s.chestsel) ~= 'number') then
+        s.chestsel = 0;
+    end
+    if (type(s.chestplayers) ~= 'number' or s.chestplayers < 1 or s.chestplayers > 6) then
+        s.chestplayers = 1;
+    end
+    if (type(s.chesttrusts) ~= 'number' or s.chesttrusts < 0 or s.chesttrusts > 6 - s.chestplayers) then
+        s.chesttrusts = 0;
+    end
 end
 
 local CRAFT_NAMES = {
@@ -163,6 +186,7 @@ local CRAFT_NAMES = {
     leather = 5, leathercraft = 5, bone = 6, bonecraft = 6, alchemy = 7, alch = 7, cook = 8, cooking = 8,
     fish = 9, fishing = 9,
     harvest = 10, harvesting = 10, excavate = 11, excavation = 11, dig = 11, log = 12, logging = 12, mine = 13, mining = 13,
+    chests = 14, chest = 14, coffers = 14, coffer = 14, treasure = 14,
 };
 
 local function help()
@@ -170,6 +194,7 @@ local function help()
     msg('/ar <craft>   open it on a craft: wood, smith, gold, cloth, leather, bone, alchemy, cook');
     msg('/ar fish   open the fishing atlas: every fish, its start and cap levels, and today\'s catches');
     msg('/ar harvest|excavate|log|mine   open a HELM tab: each zone\'s drops, odds with and without gear, and its points on a map');
+    msg('/ar chests   treasure chests and coffers: keys, odds with thief\'s tools, what they give, the gil, their spots');
     msg('/ar min   minimize it to an icon at the bottom right; click the icon to bring it back');
     msg('/ar prices export [file]   save your prices as JSON (in config/addons/allrecipes)');
     msg('/ar prices import <file>   add prices from JSON: {"4098": 90} or [{"id": 4098, "price": 90}]');
@@ -221,6 +246,9 @@ ashita.events.register('load', 'allrecipes_load', function ()
     end
     if (not helm.load()) then
         err(('No HELM data (%s). Run tools/gen_helm.py.'):fmt(tostring(helm.error)));
+    end
+    if (not chests.load()) then
+        err(('No chest data (%s). Run tools/gen_treasure.py.'):fmt(tostring(chests.error)));
     end
     if (not zonemap.load()) then
         err(('No map data (%s). Run tools/gen_maps.py.'):fmt(tostring(zonemap.error)));

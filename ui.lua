@@ -17,6 +17,7 @@ local skill  = require('skill');
 local icons  = require('icons');
 local fishing = require('fishing');
 local helm   = require('helm');
+local chests = require('chests');
 local zonemap = require('zonemap');
 
 local ui = {
@@ -333,8 +334,16 @@ local function header(s, you)
                 helm.kinds ~= nil and helm.kinds[k].name or short));
         end
     end
+    if (tab('##ar_chests', 'Chests', s.craft == chests.TAB, 'warn', 12)) then
+        s.craft, ui.scroll_top, ui.dirty = chests.TAB, true, true;
+    end
+    if (imgui.IsItemHovered()) then
+        imgui.SetTooltip('Treasure chests and coffers: each zone\'s key and level, the odds with thief\'s tools,\nwhat one gives and the gil for your party, its map and quest key items, and its spots.');
+    end
     if (s.craft == f) then
         return ui.fish_header(s, you);
+    elseif (s.craft == chests.TAB) then
+        return ui.chest_header(s, you);
     elseif (s.craft >= helm.FIRST) then
         return ui.helm_header(s, you, s.craft - helm.FIRST + 1);
     end
@@ -1567,26 +1576,30 @@ local function per(v)
     return v >= 100 and ('%d'):fmt(math.floor(v + 0.5)) or ('%.1f'):fmt(v);
 end
 
--- The map of a zone with its points (and you, when you're there).
-local function helm_map(s, z, width)
-    local maps = zonemap.of(z.id);
+--[[
+* The map of a zone with points on it (and you, when you're there): HELM points or chest spots.
+* floor_key is the setting that keeps the floor picked; what = { what one is called ('Point
+* spot'), its colour key, the line under the map }.
+--]]
+local function points_map(s, zone, points, width, floor_key, what)
+    local maps = zonemap.of(zone);
     if (#maps == 0) then
         dim('The game has no map of this zone.');
         return;
     end
     local yx, yz, here_zone = zonemap.you();
-    local here = here_zone == z.id;
+    local here = here_zone == zone;
     -- Which floor each point is on: the game's answer, kept from a visit.
     local floors, unknown = { }, 0;
-    for i, p in ipairs(z.points) do
-        floors[i] = #maps > 1 and zonemap.floor_of(z.id, p, here) or maps[1].floor;
+    for i, p in ipairs(points) do
+        floors[i] = #maps > 1 and zonemap.floor_of(zone, p, here) or maps[1].floor;
         if (floors[i] == nil) then
             unknown = unknown + 1;
         end
     end
     local pick = nil;
     for _, m in ipairs(maps) do
-        if (m.floor == s.helmfloor) then
+        if (m.floor == s[floor_key]) then
             pick = m;
         end
     end
@@ -1595,7 +1608,7 @@ local function helm_map(s, z, width)
         local best, n = maps[1], -1;
         for _, m in ipairs(maps) do
             local c = 0;
-            for i = 1, #z.points do
+            for i = 1, #points do
                 if (floors[i] == m.floor) then c = c + 1; end
             end
             if (c > n) then best, n = m, c; end
@@ -1606,11 +1619,11 @@ local function helm_map(s, z, width)
         dim('Floor');
         for i, m in ipairs(maps) do
             local c = 0;
-            for j = 1, #z.points do
+            for j = 1, #points do
                 if (floors[j] == m.floor) then c = c + 1; end
             end
             if (chip(('##ar_hf%d'):fmt(m.floor), c > 0 and ('%d (%d)'):fmt(i, c) or tostring(i), m == pick, nil, i == 1 and 6 or 4)) then
-                s.helmfloor, ui.dirty = m.floor, true;
+                s[floor_key], ui.dirty = m.floor, true;
             end
         end
     end
@@ -1627,7 +1640,7 @@ local function helm_map(s, z, width)
     local k = size / 512;
     local mx, my = imgui.GetMousePos();
     local tip = nil;
-    for i, p in ipairs(z.points) do
+    for i, p in ipairs(points) do
         local f = floors[i];
         if (f == pick.floor or f == nil) then
             local px, py = zonemap.to_map(pick, p[1], p[3]);
@@ -1636,10 +1649,10 @@ local function helm_map(s, z, width)
                 dl:AddCircle({ cx, cy }, 4, style.col('dim', 230), 12, 1.5);
             else
                 dl:AddCircleFilled({ cx, cy }, 4.5, style.col('shadow', 160), 12);
-                dl:AddCircleFilled({ cx, cy }, 3.5, style.col('bad', 255), 12);
+                dl:AddCircleFilled({ cx, cy }, 3.5, style.col(what[2], 255), 12);
             end
             if ((mx - cx) ^ 2 + (my - cy) ^ 2 <= 36) then
-                tip = ('Point spot %d: (%.0f, %.0f), height %.0f%s'):fmt(i, p[1], p[3], p[2], f == nil and '\nIts floor isn\'t known yet.' or '');
+                tip = ('%s %d: (%.0f, %.0f), height %.0f%s'):fmt(what[1], i, p[1], p[3], p[2], f == nil and '\nIts floor isn\'t known yet.' or '');
             end
         end
     end
@@ -1655,7 +1668,7 @@ local function helm_map(s, z, width)
     if (tip ~= nil) then
         imgui.SetTooltip(tip);
     end
-    dim(('The %d spots its points move between%s. A point shows at one at a time.'):fmt(#z.points, here and '; the gold dot is you' or ''));
+    dim(what[3]:fmt(#points, here and '; the gold dot is you' or ''));
     if (unknown > 0) then
         imgui.PushTextWrapPos(0);
         dim(('%d of them are on a floor not known yet (hollow): the game tells which floor a spot is on only in its zone, so they sort themselves once you\'re there.'):fmt(unknown));
@@ -1835,7 +1848,8 @@ local function helm_detail(s, kind, z, nq, hq, label)
     imgui.PopTextWrapPos();
 
     imgui.SeparatorText('Where the points are');
-    helm_map(s, z, imgui.GetContentRegionAvail());
+    points_map(s, z.id, z.points, imgui.GetContentRegionAvail(), 'helmfloor',
+        { 'Point spot', 'bad', 'The %d spots its points move between%s. A point shows at one at a time.' });
 end
 
 local function helm_body(s, you, k)
@@ -1874,6 +1888,403 @@ local function helm_body(s, you, k)
     imgui.BeginChild('ar_hdetail', { 0, bodyh + head }, ImGuiChildFlags_Borders);
     if (sel ~= nil) then
         helm_detail(s, kind, sel, nq, hq, label);
+    end
+    imgui.EndChild();
+end
+
+--[[
+* Chests (chests.lua): every treasure chest and coffer by zone, with its level, its key and what an
+* opening's worth; the one picked with its odds by key (thief's tools too), the map and quest key
+* items it gives, what it gives and the gil for your party, prices, and its spots on the map.
+--]]
+local THF = 6;
+
+local function box_sel(b)
+    return b.id * 10 + b.kind;
+end
+
+local function main_job()
+    local p = AshitaCore:GetMemoryManager():GetPlayer();
+    if (p == nil) then
+        return 0, 0;
+    end
+    return p:GetMainJob() or 0, p:GetMainJobLevel() or 0;
+end
+
+function ui.chest_header(s, you)
+    imgui.Spacing();
+    if (chests.boxes == nil) then
+        return;
+    end
+    style.big('Treasure', style.col('accent'), 30);
+    imgui.SameLine(0, 12);
+    imgui.BeginGroup();
+    local job, level = main_job();
+    if (job == THF) then
+        imgui.TextColored(style.f('good'), ('THF %d: thief\'s tools and living and skeleton keys work for you.'):fmt(level));
+    else
+        dim('Not THF (main job): only each zone\'s own key opens its box.');
+    end
+    local bag = player.inventory(os.clock());
+    local parts = { };
+    for k = 2, 4 do
+        local n = count_of(bag, chests.keys[k]);
+        if (n > 0) then
+            parts[#parts + 1] = ('%d %s'):fmt(n, model.name(chests.keys[k]));
+        end
+    end
+    dim(#parts > 0 and ('In your bags: %s'):fmt(table.concat(parts, ', ')) or 'No thief\'s tools or living or skeleton keys in your bags.');
+    imgui.EndGroup();
+end
+
+local function chest_toolbar(s)
+    if (style.chip('##ar_cah', 'sell on AH', s.sell == 'AH')) then s.sell, ui.dirty = 'AH', true; end
+    if (chip('##ar_cnpc', 'sell to NPC', s.sell == 'NPC')) then s.sell, ui.dirty = 'NPC', true; end
+    imgui.SameLine(0, 16);
+    dim('players');
+    for n = 1, 6 do
+        if (chip(('##ar_cp%d'):fmt(n), tostring(n), s.chestplayers == n, nil, n == 1 and 6 or 3)) then
+            s.chestplayers, ui.dirty = n, true;
+            s.chesttrusts = math.min(s.chesttrusts, 6 - n);
+        end
+        if (imgui.IsItemHovered()) then
+            imgui.SetTooltip('Players of your party or alliance in the zone (you too): the gil is shared between them.');
+        end
+    end
+    imgui.SameLine(0, 10);
+    dim('trusts');
+    for n = 0, 5 do
+        if (n + s.chestplayers <= 6) then
+            if (chip(('##ar_ct%d'):fmt(n), tostring(n), s.chesttrusts == n, 'good', n == 0 and 6 or 3)) then
+                s.chesttrusts, ui.dirty = n, true;
+            end
+            if (imgui.IsItemHovered()) then
+                imgui.SetTooltip('Trusts called: each counts as one more for the gil, but takes no share.');
+            end
+        end
+    end
+    imgui.SameLine(0, 16);
+    if (imgui.GetContentRegionAvail() < 170 + 90) then
+        imgui.NewLine();
+    end
+    imgui.PushItemWidth(170);
+    ui.search[1] = ui.search[1] or '';
+    if (imgui.InputTextWithHint('##ar_csearch', 'search items or zones', ui.search, 48)) then
+        s.search = ui.search[1];
+    end
+    imgui.PopItemWidth();
+    if (chip('##ar_cfg', 'settings', s.cfg, nil, 8)) then s.cfg, ui.dirty = not s.cfg, true; end
+end
+
+-- How an opening's worth adds up, for its row's tooltip.
+local function chest_worth_tip(s, row)
+    local b, v = row.box, row.value;
+    local lo, hi = chests.gil(b, s.chestplayers, s.chesttrusts);
+    local lines = { ('%s %s, an opening %s:'):fmt(zone_name(b.id), chests.KIND[b.kind]:lower(), s.sell == 'AH' and 'selling on the AH' or 'selling to an NPC') };
+    lines[#lines + 1] = ('Gil: %s (%s of openings, %s-%s each)'):fmt(about(v.gil), model.pct(b.gil), model.gil(lo), model.gil(hi));
+    lines[#lines + 1] = ('Items: %s (%d of %d priced)'):fmt(v.items ~= nil and about(v.items) or '?', v.priced, v.count);
+    local key = prices.view[b.key];
+    if (key ~= nil) then
+        lines[#lines + 1] = ('%s: -%s'):fmt(model.name(b.key), model.gil(key));
+    else
+        lines[#lines + 1] = ('%s has no price, so it isn\'t taken off.'):fmt(model.name(b.key));
+    end
+    lines[#lines + 1] = ('An opening: %s'):fmt(model.gil(row.net or v.total, true));
+    return table.concat(lines, '\n');
+end
+
+local function chest_list(s, rows, width, height)
+    local gil_r = width - 24;
+    local spots_r = gil_r - 56;
+    local lv_r = spots_r - 44;
+    local find_r = lv_r - 40;
+    local searching = (s.search or '') ~= '';
+    local function head(label, key, x, right, first_, tip)
+        local on = (s.chestsort or 'zone') == key;
+        local shown = on and (label .. ((s.chestdir or 1) > 0 and ' ^' or ' v')) or label;
+        local at = right and x - imgui.CalcTextSize(shown) or x;
+        if (first_) then
+            imgui.SetCursorPosX(at);
+        else
+            imgui.SameLine(at);
+        end
+        imgui.TextColored(style.f(on and 'accent' or 'dim'), shown);
+        if (tip ~= nil and imgui.IsItemHovered()) then
+            imgui.SetTooltip(tip);
+        end
+        if (imgui.IsItemClicked(ImGuiMouseButton_Left)) then
+            if (on) then
+                s.chestdir = -(s.chestdir or 1);
+            else
+                s.chestsort, s.chestdir = key, (key == 'zone' or key == 'level') and 1 or -1;
+            end
+            ui.dirty = true;
+        end
+    end
+    head('Zone', 'zone', 8, false, true);
+    if (searching) then
+        head('Item', 'find', find_r, true, false, 'The chance an opening gives what you searched for.');
+    end
+    head('Lv', 'level', lv_r, true, false, 'The box\'s level: the gil it gives, and how THF keys do against it.');
+    head('Spots', 'spots', spots_r, true, false, 'How many spots it moves between.');
+    head(s.sell == 'AH' and 'AH' or 'NPC', 'gil', gil_r, true, false, ('What an opening makes %s: the gil for the party picked above and its\nitems at their chances, less the key\'s price. Faint where something has no price.\nPick a box to type prices.'):fmt(
+        s.sell == 'AH' and 'selling on the AH' or 'selling to an NPC'));
+
+    imgui.BeginChild('ar_clist', { width, height }, ImGuiChildFlags_Borders);
+    if (ui.scroll_top) then
+        imgui.SetScrollY(0);
+        ui.scroll_top = false;
+    end
+    if (#rows == 0) then
+        dim(searching and 'No chest or coffer gives that.' or 'No chests.');
+    end
+    local dl = imgui.GetWindowDrawList();
+    local mx = imgui.GetMousePos();
+    for _, row in ipairs(rows) do
+        local b = row.box;
+        local id = box_sel(b);
+        local x0, y0 = imgui.GetCursorScreenPos();
+        if (imgui.Selectable(('##arc%d'):fmt(id), ui.csel == id)) then
+            ui.cpick = id;
+        end
+        if (imgui.IsItemHovered() and mx >= x0 + spots_r + 4) then
+            imgui.SetTooltip(chest_worth_tip(s, row));
+        end
+        local function text(x, col, t)
+            dl:AddText({ x0 + x, y0 }, col, t);
+        end
+        local function rtext(x, col, t)
+            text(x - imgui.CalcTextSize(t), col, t);
+        end
+        local name = fit(row.name, (searching and find_r - 50 or lv_r - 40) - 8 - 64);
+        text(8, style.col('text'), name);
+        local tx = 8 + imgui.CalcTextSize(name) + 8;
+        local function tag(t, key)
+            local tw, th = imgui.CalcTextSize(t);
+            dl:AddRectFilled({ x0 + tx - 3, y0 }, { x0 + tx + tw + 3, y0 + th }, style.col(key, 40), th / 2, ImDrawFlags_RoundCornersAll);
+            text(tx, style.col(key, 220), t);
+            tx = tx + tw + 9;
+        end
+        tag(chests.KIND[b.kind]:lower(), b.kind == 1 and 'warn' or 'hq');
+        if (b.tag) then tag(model.EXPANSION_SHORT[b.tag] or b.tag, 'dim'); end
+        if (searching) then
+            rtext(find_r, style.col('good'), row.find ~= nil and model.pct(row.find) or '-');
+        end
+        rtext(lv_r, style.col('text'), tostring(b.level));
+        rtext(spots_r, style.col('dim'), tostring(#b.points));
+        local v = row.value;
+        local net = row.net or v.total;
+        local full = v.priced == v.count and row.net ~= nil;
+        rtext(gil_r, style.col(net >= 0 and 'good' or 'bad', full and 255 or 150), model.short(net));
+    end
+    imgui.EndChild();
+end
+
+local function chest_detail(s, b)
+    style.big(zone_name(b.id), style.col('text'), 22);
+    style.tag(chests.KIND[b.kind], b.kind == 1 and 'warn' or 'hq');
+    imgui.SameLine(0, 6);
+    style.tag(('level %d'):fmt(b.level), 'text');
+    if (b.tag) then
+        imgui.SameLine(0, 6);
+        style.tag((model.EXPANSION_SHORT[b.tag] or b.tag) .. ' zone', 'dim');
+    end
+    imgui.SameLine(0, 6);
+    style.tag(('%d spots'):fmt(#b.points), 'dim');
+
+    -- Opening it: the odds with each key.
+    local job, level = main_job();
+    local thf = job == THF;
+    local at = thf and level or b.level;
+    local bag = player.inventory(os.clock());
+    imgui.SeparatorText('Opening it');
+    local w = imgui.GetContentRegionAvail();
+    local outs = b.kind == 2 and 4 or 3;
+    local cx = { };
+    for i = 1, outs do
+        cx[i] = w - (outs - i) * 56;
+    end
+    local have_r = cx[1] - 70;
+    dim('');
+    right_text(have_r, 'dim', 'in bags');
+    for i = 1, outs do
+        right_text(cx[i], 'dim', chests.OUTCOMES[i]);
+    end
+    local keys = { 'good', 'bad', 'warn', 'bad' };
+    for k = 1, 4 do
+        local id = chests.key_item(b, k);
+        local usable = k == 1 or thf;
+        imgui.TextColored(style.f(usable and 'text' or 'dim'), fit(model.name(id), have_r - 60));
+        if (imgui.IsItemHovered()) then
+            imgui.SetTooltip(k == 1 and 'The zone\'s own key: anyone can use it, and it always opens it.\nCtrl+click: open on ffxiah.com'
+                or ('Only a THF (main job) can use one.%s\nCtrl+click: open on ffxiah.com'):fmt(thf and '' or (' The odds are for a THF of level %d or over.'):fmt(b.level)));
+            if (imgui.IsItemClicked(ImGuiMouseButton_Left) and imgui.GetIO().KeyCtrl) then
+                ui.open_item(id);
+            end
+        end
+        local n = count_of(bag, id);
+        right_text(have_r, n > 0 and 'text' or 'dim', tostring(n));
+        local o = chests.odds(b, k, at);
+        for i = 1, outs do
+            right_text(cx[i], o[i] > 0 and (usable and keys[i] or 'dim') or 'dim', o[i] > 0 and model.pct(o[i]) or '-');
+        end
+    end
+    imgui.PushTextWrapPos(0);
+    if (thf and level < b.level) then
+        imgui.TextColored(style.f('warn'), ('You\'re %d levels under it: THF keys open it %d%% less often (they fail instead).'):fmt(b.level - level, math.min(5 * (b.level - level), 100)));
+    elseif (not thf) then
+        dim(('THF keys\' odds are for a THF of level %d or over; each level under takes 5%% off opening it.'):fmt(b.level));
+    end
+    local you = thf and level or 75;
+    local weak = math.min(math.max(math.floor((5 + you - b.level) / 5), 5), 60);
+    dim(('A trap gives Weakness for %d minutes%s and moves it; after a fail it stays. Either way the key is used up.%s'):fmt(
+        weak, thf and '' or ' (at level 75)', b.kind == 2 and ' A mimic is a fight, and the coffer moves.' or ''));
+    if (b.map > 0) then
+        local has = player.has_key_item(b.map);
+        imgui.TextColored(style.f(has and 'dim' or 'hq'), ('%s: %s'):fmt(player.key_item_name(b.map),
+            has and 'you have it.' or 'the first opening gives you this instead of gil or an item.'));
+    end
+    for _, q in ipairs(b.quests) do
+        local has = player.has_key_item(q.ki);
+        imgui.TextColored(style.f(has and 'dim' or 'hq'), ('%s: during %s, opening it gives this instead%s.'):fmt(player.key_item_name(q.ki), q.quest,
+            has and ' (you have it)' or ', even while it\'s an illusion'));
+    end
+    imgui.PopTextWrapPos();
+
+    -- What it gives.
+    imgui.SeparatorText('What it gives');
+    local lo, hi, avg, n = chests.gil(b, s.chestplayers, s.chesttrusts);
+    local w2 = imgui.GetContentRegionAvail();
+    local ch_r, each_r = w2 - 150, w2;
+    dim('');
+    right_text(ch_r, 'dim', 'chance');
+    right_text(each_r, 'dim', 'gil each');
+    imgui.TextColored(style.f('warn'), 'Gil');
+    right_text(ch_r, 'good', model.pct(b.gil));
+    right_text(each_r, 'text', ('%s-%s'):fmt(model.gil(lo), model.gil(hi)));
+    for _, l in ipairs(b.loot) do
+        link(l.id, fit(model.name(l.id), ch_r - 70));
+        right_text(ch_r, 'good', model.pct(l.chance));
+    end
+    imgui.PushTextWrapPos(0);
+    dim(('With %d player%s%s each gets %d x %d x (%d + 0 to %d)%s: %s on average. The %d is 1 + the players + the trusts, at most 6 (the server counts you twice), so trusts add gil without taking a share.'):fmt(
+        s.chestplayers, s.chestplayers == 1 and '' or 's', s.chesttrusts > 0 and (' and %d trust%s'):fmt(s.chesttrusts, s.chesttrusts == 1 and '' or 's') or '',
+        n, b.level, b.level, b.level, s.chestplayers > 1 and (' / %d'):fmt(s.chestplayers) or '', model.gil(avg), n));
+    imgui.PopTextWrapPos();
+
+    -- What an opening makes: gil, each item at its chance, less the key.
+    imgui.SeparatorText(s.sell == 'AH' and 'What it makes, selling on the AH' or 'What it makes, selling to an NPC');
+    local w3 = imgui.GetContentRegionAvail();
+    local val_r = w3;
+    local box_x = val_r - 64 - 76;
+    local npc_r = box_x - 10;
+    local name_w = npc_r - 64;
+    dim('');
+    right_text(npc_r, 'dim', 'NPC each');
+    imgui.SameLine(box_x);
+    dim('AH each');
+    right_text(val_r, 'dim', 'an opening');
+    local v = chests.worth(b, worth_fn(s), avg);
+    imgui.TextColored(style.f('warn'), 'Gil');
+    right_text(val_r, 'text', about(v.gil));
+    local history, unpriced = false, { };
+    for _, l in ipairs(b.loot) do
+        link(l.id, fit(model.name(l.id), name_w));
+        local npc = model.npc[l.id];
+        right_text(npc_r, npc and 'text' or 'dim', npc == false and 'won\'t buy' or npc == nil and '?' or model.gil(npc));
+        imgui.SameLine(box_x);
+        price_box('c' .. l.id, l.id, 76);
+        local each = model.worth(l.id, s.sell);
+        right_text(val_r, each ~= nil and 'text' or 'dim', each ~= nil and about(l.chance * each) or '?');
+        if (each == nil) then
+            unpriced[#unpriced + 1] = model.name(l.id);
+        elseif (s.sell == 'AH' and prices.get(l.id) == nil) then
+            history = true;
+        end
+    end
+    local key = prices.view[b.key];
+    link(b.key, fit(('%s (the key)'):fmt(model.name(b.key)), name_w), 'dim');
+    imgui.SameLine(box_x);
+    price_box('ck' .. b.key, b.key, 76);
+    right_text(val_r, key ~= nil and 'bad' or 'dim', key ~= nil and ('-' .. model.gil(key)) or '?');
+    if (key ~= nil and prices.get(b.key) == nil) then
+        history = true;
+    end
+    local net = v.total - (key or 0);
+    imgui.TextColored(style.f('accent'), key ~= nil and 'An opening with its key' or 'An opening');
+    local text = model.gil(net, true);
+    local tw = imgui.CalcTextSize(text) * 20 / math.max(imgui.GetFontSize(), 1);
+    imgui.SameLine(val_r - tw);
+    style.big(text, style.col(gil_key(net)), 20);
+    if (thf) then
+        -- With a THF key: the opening at its chance, less the key (used up whatever happens).
+        for k = 2, 4 do
+            local id = chests.keys[k];
+            local p = chests.odds(b, k, level)[1];
+            local price = prices.view[id];
+            link(id, fit(('With %s (opens %s)'):fmt(model.name(id):lower(), model.pct(p)), name_w), 'text');
+            imgui.SameLine(box_x);
+            price_box('ck' .. id, id, 76);
+            local tn = p * v.total - (price or 0);
+            right_text(val_r, price ~= nil and gil_key(tn) or 'dim', price ~= nil and model.gil(tn, true) or '?');
+        end
+    end
+    imgui.PushTextWrapPos(0);
+    if (#unpriced > 0) then
+        imgui.TextColored(style.f('warn'), (v.items == nil and 'Type a price for: %s' or 'Not counted (no price): %s'):fmt(table.concat(unpriced, ', ')));
+    end
+    if (key == nil) then
+        dim(('Type the %s\'s price to take it off.'):fmt(model.name(b.key)));
+    end
+    if (history) then
+        dim('~ prices are from the AH history; type your own to use those instead.');
+    end
+    imgui.PopTextWrapPos();
+
+    imgui.SeparatorText('Where it can be');
+    imgui.PushTextWrapPos(0);
+    local il = b.kind == 1 and { chests.illusion[1], chests.illusion[2] } or { chests.illusion[3], chests.illusion[4] };
+    dim(('Opened or trapped, it hides for %d seconds and comes back at one of these spots, maybe the same one. For %d-%d minutes after it gives gil or an item it\'s an illusion: a trade then only moves it, and the key is kept.'):fmt(
+        chests.respawn[1], il[1] / 60, il[2] / 60));
+    imgui.PopTextWrapPos();
+    points_map(s, b.id, b.points, imgui.GetContentRegionAvail(), 'chestfloor',
+        { 'Spot', 'warn', 'The %d spots it moves between%s. It\'s at one at a time.' });
+end
+
+local function chest_body(s, you)
+    if (chests.error ~= nil or chests.boxes == nil) then
+        imgui.TextColored(style.f('bad'), ('No chest data (%s). Run tools/gen_treasure.py.'):fmt(tostring(chests.error)));
+        return;
+    end
+    chest_toolbar(s);
+    imgui.Spacing();
+    local rows = chests.rows(s, model.name, zone_name, { worth = worth_fn(s), key = function (id) return prices.view[id]; end,
+        players = s.chestplayers, trusts = s.chesttrusts, stamp = ('%d:%s'):fmt(prices.version, s.sell) });
+    local sel = nil;
+    for _, row in ipairs(rows) do
+        if (box_sel(row.box) == s.chestsel) then
+            sel = row.box;
+        end
+    end
+    if (sel == nil and rows[1] ~= nil) then
+        sel = rows[1].box;
+        s.chestsel = box_sel(sel);
+    end
+    ui.csel, ui.cpick = sel ~= nil and box_sel(sel) or nil, nil;
+    local aw, ah = imgui.GetContentRegionAvail();
+    local head = imgui.GetTextLineHeightWithSpacing();
+    local lw = math.min(440, math.floor(aw * 0.46));
+    local bodyh = math.max(80, ah - head - 4);
+    imgui.BeginGroup();
+    chest_list(s, rows, lw, bodyh);
+    imgui.EndGroup();
+    if (ui.cpick ~= nil and ui.cpick ~= s.chestsel) then
+        s.chestsel, s.chestfloor, ui.dirty = ui.cpick, -1, true;
+    end
+    imgui.SameLine();
+    imgui.BeginChild('ar_cdetail', { 0, bodyh + head }, ImGuiChildFlags_Borders);
+    if (sel ~= nil) then
+        chest_detail(s, sel);
     end
     imgui.EndChild();
 end
@@ -1992,9 +2403,11 @@ function ui.draw(s, you, save)
     style.push_window();
     style.push_controls();
     local fish = s.craft == fishing.SKILL;
-    local gather = s.craft >= helm.FIRST;
-    local tab_name = gather and (helm.kinds ~= nil and helm.kinds[s.craft - helm.FIRST + 1].name or 'HELM') or player.skill_info(s.craft).name;
-    local title = ('allrecipes - %s%s###allrecipes'):fmt(tab_name, (s.desynth and not fish and not gather) and ' desynthesis' or '');
+    local chest = s.craft == chests.TAB;
+    local gather = s.craft >= helm.FIRST and not chest;
+    local tab_name = chest and 'Treasure chests' or gather and (helm.kinds ~= nil and helm.kinds[s.craft - helm.FIRST + 1].name or 'HELM')
+        or player.skill_info(s.craft).name;
+    local title = ('allrecipes - %s%s###allrecipes'):fmt(tab_name, (s.desynth and not fish and not gather and not chest) and ' desynthesis' or '');
     -- No close button: a - in its place minimizes it to the icon (/ar hides it).
     if (imgui.Begin(title, nil, bit.bor(ImGuiWindowFlags_NoSavedSettings, ImGuiWindowFlags_NoCollapse))) then
         local wx, wy = imgui.GetWindowPos();
@@ -2005,12 +2418,14 @@ function ui.draw(s, you, save)
         -- A chip in the header can switch between a craft and fishing; the rest of the frame
         -- is left out then, and drawn for the new tab next frame.
         local craft = s.craft;
-        if (fish or gather) then
+        if (fish or gather or chest) then
             header(s, you);
             imgui.Spacing();
             if (s.craft == craft) then
                 if (fish) then
                     fish_body(s, you);
+                elseif (chest) then
+                    chest_body(s, you);
                 else
                     helm_body(s, you, craft - helm.FIRST + 1);
                 end

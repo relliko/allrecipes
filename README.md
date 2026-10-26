@@ -14,6 +14,7 @@ Every era synthesis and desynthesis recipe on PhoenixXI, by craft, for Ashita v4
 - The crystals in your inventory are counted at the top of the window.
 - The **Fish** tab is a fishing atlas: every fish with the level to start it and the level it caps at, your skill-up chance, the bait it takes, where it bites, what it sells for, and how many fish you've caught today and what they're worth. See [Fishing atlas](#fishing-atlas).
 - The **Harvest**, **Excavate**, **Log** and **Mine** tabs cover HELM: every zone's drops and how often you get each, how often the tool breaks with and without Field or Worker gear, what a try makes after the tool's price, and its gathering points on the game's own map of the zone. See [HELM](#helm).
+- The **Chests** tab covers treasure chests and coffers: each one's key and level, the odds with thief's tools and living and skeleton keys, its map and quest key items, what it gives and the gil for your party, what an opening makes after the key, and its spots on the map. See [Treasure chests](#treasure-chests).
 
 Nothing is ever sent to the server and nothing is asked of it: allrecipes only reads client memory, the game's files and the packets the game receives anyway. (To sort HELM points onto a zone's floors it also asks the game which floor a spot is on, which happens inside your client.) Phoenix only allows tools on its [approved addon list](https://phoenix-xi.com/approved-addons), so check it's there before using it on the server.
 
@@ -28,6 +29,7 @@ Nothing is ever sent to the server and nothing is asked of it: allrecipes only r
 | `/ar <craft>` | open it on a craft: `wood`, `smith`, `gold`, `cloth`, `leather`, `bone`, `alchemy`, `cook` |
 | `/ar fish` | open the fishing atlas |
 | `/ar harvest`, `excavate`, `log`, `mine` | open a HELM tab |
+| `/ar chests` | open the treasure chests and coffers |
 | `/ar min` | minimize it to an icon at the bottom right |
 | `/ar prices export [file]` | save your prices as JSON (`prices.json` in `config/addons/allrecipes`) |
 | `/ar prices import <file>` | add prices from JSON |
@@ -103,6 +105,19 @@ The data comes from Phoenix and the game (run `gen_recipes.py` after `gen_helm.p
 
     python tools/gen_helm.py --phoenix C:\code\Phoenix
     python tools/gen_maps.py --dump C:\Games\PhoenixXI\FFXiMain_04490000.bin
+
+## Treasure chests
+The **Chests** chip after the HELM tabs lists every treasure chest and coffer, from Phoenix's own treasure script (`scripts/globals/treasure.lua`): 27 chests and 18 coffers. The list shows each one's zone, its level, how many spots it moves between and what an opening makes after its key. Type an item (or `gil`) in the search box to list only the boxes that give it, with its chance.
+
+Pick one to see:
+- **Opening it:** its zone key and the THF keys, how many of each you carry, and the odds of each outcome. The zone's key always opens it. A THF (main job) can try thief's tools, a living key or a skeleton key instead: each can open it, fail, set off a trap (Weakness) or, on a coffer, be a mimic. For each level you're under the box, the chance of opening drops 5% (it fails instead). The key is used up whatever happens. If the zone has a map key item, the first opening gives you the map instead of anything else. Quests that need a key item from it (Under Oath, True Will, Knight Stalker, Sorcery of the North, Enveloped in Darkness) are listed with whether you have it.
+- **What it gives:** the chance of gil and of each item, and the gil each player gets. The server gives each player `n x L x (L + 0 to L)` divided by the players, where L is the box's level and n is 1 + the players + the trusts, at most 6. It counts you twice, so trusts add gil without taking a share. The **players** and **trusts** chips pick the party it's worked out for.
+- **What it makes:** price boxes for its items and its key, the average gil, and what an opening makes with its key. A THF also sees what one makes with each THF key, at that key's chance of opening it.
+- **Where it can be:** its spots on the game's map of the zone. Opened or trapped, it hides for 3 minutes and comes back at one of them, maybe the same one. For 15 to 60 minutes after it gives gil or an item it's an illusion: a trade then only moves it, and the key is kept.
+
+The data comes from Phoenix (run `gen_recipes.py` after it, so loot and keys get NPC prices):
+
+    python tools/gen_treasure.py --phoenix C:\code\Phoenix
 
 ## Your skill to the tenth
 The server keeps craft skill in tenths but only tells your client whole levels. Every skill-up does come with a message, though: "skill rises 0.3 points", and "reaches level 23" when that crosses a level. allrecipes reads those (only reads; they're the packets the game receives anyway) and keeps your skill as a range that each skill-up narrows:

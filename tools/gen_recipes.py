@@ -3,8 +3,9 @@ Generates allrecipes' data from a Phoenix (LandSandBoat fork) checkout:
 
     data/recipes.lua  the era recipes from sql/synth_recipes.sql
     data/npc.lua      what an NPC shop pays for each item in them (sql/item_basic.sql, BaseSell),
-                      and for the fish and HELM drops in data/fish.lua and data/helm.lua (run
-                      gen_fish.py and gen_helm.py first when those change)
+                      and for the fish, HELM drops and chest loot in data/fish.lua, data/helm.lua
+                      and data/treasure.lua (run gen_fish.py, gen_helm.py and gen_treasure.py
+                      first when those change)
     data/stacks.lua   how many of an item make a stack, for every item that stacks
     data/loss.lua     materials that break more or less often than half the time
                       (materialLossRates in src/map/utils/synthutils.cpp)
@@ -184,10 +185,16 @@ def write_recipes(recipes, out):
 FISH_ROW = re.compile(r'^\s*\{ (\d+), "', re.M)
 HELM_DROP = re.compile(r"\{ \d+, (\d+), \d+, [01] \}")
 HELM_TOOL = re.compile(r"\btool = (\d+)")
+# Chest loot ({ item, weight }), each box's key (its 4th number) and the THF keys (keys = { ... })
+# in data/treasure.lua.
+TREASURE_LOOT = re.compile(r"\{ (\d+), \d+ \}")
+TREASURE_KEY = re.compile(r"^\s*\{ \d+, [12], \d+, (\d+), ", re.M)
+TREASURE_KEYS = re.compile(r"\bkeys = \{ ([\d, ]+) \}")
 
 
 def data_items(data):
-    """The fish, rods, HELM drops and tools in data/fish.lua and data/helm.lua, where they exist."""
+    """The fish, rods, HELM drops and tools, and chest loot and keys in data/fish.lua, data/helm.lua
+    and data/treasure.lua, where they exist."""
     ids = set()
     fish, helm = data / "fish.lua", data / "helm.lua"
     if fish.exists():
@@ -196,6 +203,14 @@ def data_items(data):
         text = helm.read_text(encoding="utf-8")
         ids.update(int(x) for x in HELM_DROP.findall(text))
         ids.update(int(x) for x in HELM_TOOL.findall(text))
+    chests = data / "treasure.lua"
+    if chests.exists():
+        text = chests.read_text(encoding="utf-8")
+        ids.update(int(x) for x in TREASURE_LOOT.findall(text))
+        ids.update(int(x) for x in TREASURE_KEY.findall(text))
+        for keys in TREASURE_KEYS.findall(text):
+            ids.update(int(x) for x in keys.split(","))
+    ids.discard(0)
     return ids
 
 
