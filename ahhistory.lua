@@ -75,6 +75,9 @@ local function kernel()
             int __stdcall ReadProcessMemory(void* process, const void* address, void* buffer, size_t size, size_t* read);
             int __stdcall QueryPerformanceCounter(int64_t* count);
             int __stdcall QueryPerformanceFrequency(int64_t* freq);
+            typedef struct { uint32_t attributes; uint32_t created[2]; uint32_t accessed[2]; uint32_t written[2];
+                             uint32_t size_high; uint32_t size_low; } ar_fileinfo_t;
+            int __stdcall GetFileAttributesExA(const char* name, int level, ar_fileinfo_t* info);
         ]]);
         win = { ffi = ffi, buf = ffi.new('uint8_t[?]', CHUNK), got = ffi.new('size_t[1]'), process = ffi.C.GetCurrentProcess(),
                 qpc = ffi.new('int64_t[1]') };
@@ -616,14 +619,24 @@ local function file()
     return prices.dir() .. '/ahhistory.lua';
 end
 
-function ah.load()
-    ah.data, ah.error = { }, nil;
-    local t, why, moved = prices.read(file());
-    ah.moved = moved;
-    if (t == nil) then
-        ah.error = why;
-        return;
+-- The history file's last write and size as a string (nil when there's none), to notice another
+-- addon (ahweb) writing it.
+local function stamp(path)
+    local k = kernel();
+    local info = k.ffi.new('ar_fileinfo_t');
+    if (k.ffi.C.GetFileAttributesExA(path, 0, info) == 0) then
+        return nil;
     end
+    return ('%d.%d.%d'):fmt(info.written[1], info.written[0], info.size_low);
+end
+
+-- What the history file holds, as ah.data does, or nil and why.
+local function read_file()
+    local t, why, moved = prices.read(file());
+    if (t == nil) then
+        return nil, why, moved;
+    end
+    local data = { };
     for id, d in pairs(t) do
         id = tonumber(id);
         if (id ~= nil and type(d) == 'table') then
@@ -638,15 +651,74 @@ function ah.load()
                     end
                 end
             end
-            ah.data[id] = keep;
+            data[id] = keep;
         end
     end
+    return data;
+end
+
+function ah.load()
+    ah.data, ah.error = { }, nil;
+    local data, why, moved = read_file();
+    ah.moved = moved;
+    ah.stamp = stamp(file());
+    if (data == nil) then
+        ah.error = why;
+        return;
+    end
+    ah.data = data;
     prices.touch();
+end
+
+--[[
+* Takes in what another addon (ahweb, from the website) wrote to the history file: an item's
+* sales on disk replace those kept here when they're newer, and items only there are added.
+--]]
+function ah.merge_disk()
+    ah.stamp = stamp(file());
+    local data = read_file();
+    if (data == nil) then
+        return;
+    end
+    local changed = false;
+    for id, d in pairs(data) do
+        local mine = ah.data[id];
+        if (mine == nil) then
+            ah.data[id], changed = d, true;
+        else
+            for _, kind in ipairs({ 'single', 'stack', 'unknown' }) do
+                if (d[kind] ~= nil and newest(d[kind]) > newest(mine[kind])) then
+                    mine[kind], mine.at, changed = d[kind], math.max(mine.at or 0, d.at or 0), true;
+                end
+            end
+            mine.use = mine.use or d.use;
+        end
+    end
+    if (changed) then
+        prices.touch();
+    end
+end
+
+-- Called every frame: reads the history file again when something else has changed it.
+function ah.watch(now)
+    if (now < (ah.next_watch or 0)) then
+        return;
+    end
+    ah.next_watch = now + 3;
+    local st = stamp(file());
+    if (st ~= nil and st ~= ah.stamp) then
+        ah.merge_disk();
+    end
 end
 
 function ah.save()
     if (not ashita.fs.exists(prices.dir())) then
         ashita.fs.create_dir(prices.dir());
+    end
+    -- What another addon wrote since it was read isn't lost.
+    local st = stamp(file());
+    if (st ~= nil and st ~= ah.stamp) then
+        ah.merge_disk();
     end
     local ids = { };
     for id in pairs(ah.data) do
@@ -678,6 +750,7 @@ function ah.save()
     end
     f:write(table.concat(lines, '\n') .. '\n');
     f:close();
+    ah.stamp = stamp(file());
     ah.dirty, ah.saved = false, os.clock();
     return true;
 end

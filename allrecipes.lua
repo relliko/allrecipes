@@ -37,7 +37,7 @@
 
 addon.name    = 'allrecipes';
 addon.author  = 'Relli';
-addon.version = '0.8';
+addon.version = '0.8.1';
 addon.desc    = 'Every era recipe by craft, with your odds, skill-ups, HQ rates and profit; a fishing atlas; HELM; and treasure chests.';
 addon.link    = 'https://github.com/relliko/allrecipes';
 
@@ -399,6 +399,7 @@ ashita.events.register('d3d_present', 'allrecipes_present', function ()
         ah.prefer = s.ahbasis == 'stack' and 'stack' or 'single';
         prices.touch();
     end
+    ah.watch(now);
     ah.tick(now);
     local you = player.you(s.gear, s.support);
     skill.sync(s.skill, you, now);
